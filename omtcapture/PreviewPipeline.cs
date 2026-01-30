@@ -105,6 +105,7 @@ namespace omtcapture
             {
                 FileName = fileName,
                 Arguments = args,
+                RedirectStandardInput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true

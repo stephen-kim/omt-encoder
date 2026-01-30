@@ -92,7 +92,24 @@ if systemctl is-active --quiet omtcapture; then
 fi
 
 sudo mkdir -p "$INSTALL_DIR"
-sudo cp "$ROOT_DIR/omtcapture/build/arm64/"* "$INSTALL_DIR/"
+CONFIG_BACKUP=""
+if sudo test -f "$INSTALL_DIR/config.xml"; then
+  CONFIG_BACKUP="$(mktemp)"
+  sudo cp "$INSTALL_DIR/config.xml" "$CONFIG_BACKUP"
+fi
+
+for file in "$ROOT_DIR/omtcapture/build/arm64/"*; do
+  base="$(basename "$file")"
+  if [[ "$base" == "config.xml" ]]; then
+    continue
+  fi
+  sudo cp "$file" "$INSTALL_DIR/"
+done
+
+if [[ -n "$CONFIG_BACKUP" ]]; then
+  sudo cp "$CONFIG_BACKUP" "$INSTALL_DIR/config.xml"
+  rm -f "$CONFIG_BACKUP"
+fi
 sudo cp "$ROOT_DIR/omtcapture/omtcapture.service" /etc/systemd/system/omtcapture.service
 
 sudo systemctl daemon-reload
