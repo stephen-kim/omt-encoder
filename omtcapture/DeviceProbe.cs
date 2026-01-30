@@ -11,7 +11,8 @@ namespace omtcapture
                 AudioInputs = RunCommand("arecord", "-l"),
                 AudioOutputs = RunCommand("aplay", "-l"),
                 VideoDevices = ListDeviceNodes("/dev", "video*"),
-                Framebuffers = ListDeviceNodes("/dev", "fb*")
+                Framebuffers = ListDeviceNodes("/dev", "fb*"),
+                DisplayMode = GetDisplayMode()
             };
         }
 
@@ -63,6 +64,29 @@ namespace omtcapture
                 return new List<string>();
             }
         }
+
+        private static string GetDisplayMode()
+        {
+            string lightdm = RunCommand("systemctl", "is-active lightdm").Trim();
+            if (lightdm == "active")
+            {
+                return "desktop";
+            }
+
+            string gdm = RunCommand("systemctl", "is-active gdm").Trim();
+            if (gdm == "active")
+            {
+                return "desktop";
+            }
+
+            string defaultTarget = RunCommand("systemctl", "get-default").Trim();
+            if (defaultTarget.Contains("graphical"))
+            {
+                return "desktop";
+            }
+
+            return "console";
+        }
     }
 
     internal sealed class DeviceSnapshot
@@ -71,5 +95,6 @@ namespace omtcapture
         public string AudioOutputs { get; set; } = string.Empty;
         public List<string> VideoDevices { get; set; } = new();
         public List<string> Framebuffers { get; set; } = new();
+        public string DisplayMode { get; set; } = "unknown";
     }
 }

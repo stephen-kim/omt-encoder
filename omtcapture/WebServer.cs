@@ -215,23 +215,145 @@ namespace omtcapture
 <meta name=""viewport"" content=""width=device-width, initial-scale=1"" />
 <title>OMT Capture Control</title>
 <style>
-body { font-family: ""Helvetica"", ""Arial"", sans-serif; margin: 24px; background: #f4f5f7; color: #1b1c1f; }
-.page { max-width: 600px; margin: 0 auto; }
-section { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 6px 16px rgba(16, 24, 40, 0.08); }
-label { display: block; font-weight: 600; margin-top: 10px; }
-input, select, textarea { width: 100%; padding: 8px; margin-top: 6px; border-radius: 6px; border: 1px solid #c7c9d1; }
-button { margin-top: 12px; padding: 10px 16px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
-pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow: auto; }
-small { color: #586174; }
-details { margin-top: 8px; }
+:root {
+  --bg-0: #0b0f14;
+  --bg-1: #121923;
+  --bg-2: #0f1319;
+  --card: #131a24;
+  --card-2: #0f141c;
+  --border: #273142;
+  --muted: #9aa4b2;
+  --text: #e5e9f0;
+  --accent: #4cc9f0;
+  --accent-2: #7cf3c9;
+  --danger: #ff6b6b;
+  --shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: ""Space Grotesk"", ""IBM Plex Sans"", ""Manrope"", sans-serif;
+  margin: 0;
+  padding: 28px 16px 48px;
+  color: var(--text);
+  background:
+    radial-gradient(700px 400px at 10% -10%, rgba(76, 201, 240, 0.18), transparent),
+    radial-gradient(700px 400px at 90% -10%, rgba(124, 243, 201, 0.14), transparent),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  min-height: 100vh;
+}
+
+.page {
+  max-width: 600px;
+  margin: 0 auto;
+  display: grid;
+  gap: 16px;
+}
+
+h1 {
+  font-size: 28px;
+  margin: 8px 0 6px;
+  letter-spacing: 0.2px;
+}
+
+h2 {
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+h3 {
+  font-size: 16px;
+  margin: 14px 0 6px;
+  color: var(--text);
+}
+
+section {
+  background: linear-gradient(180deg, var(--card), var(--card-2));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d1219;
+  color: var(--text);
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(76, 201, 240, 0.6);
+  box-shadow: 0 0 0 3px rgba(76, 201, 240, 0.14);
+}
+
+input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+
+button {
+  margin-top: 14px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #071218;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(76, 201, 240, 0.25);
+}
+
+button:hover { transform: translateY(-1px); }
+
+pre {
+  background: #0b0f14;
+  color: #cbd5e1;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #1f2734;
+  overflow: auto;
+}
+
+small { color: var(--muted); display: block; margin-top: 8px; }
+
+details { margin-top: 10px; }
+
+.check-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.check-row label { margin: 0; font-weight: 600; color: var(--text); }
+.check-grid { display: grid; gap: 8px; margin-top: 8px; }
+.check-item { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
+
+.fade-in { animation: fadeIn 300ms ease-out; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>
 </head>
 <body>
-<div class=""page"">
+<div class=""page fade-in"">
   <h1>OMT Capture Control</h1>
   <section>
     <h2>Config</h2>
     <div id=""status""></div>
+    <small id=""displayMode""></small>
 
     <h3>Video</h3>
     <label>Video device</label>
@@ -255,16 +377,20 @@ details { margin-top: 8px; }
     <select id=""hdmiDevice""></select>
     <label>TRS input</label>
     <select id=""trsDevice""></select>
-    <label>Monitor output</label>
-    <input id=""monitorEnabled"" type=""checkbox"" />
+    <div class=""check-row"">
+      <input id=""monitorEnabled"" type=""checkbox"" />
+      <label for=""monitorEnabled"">Monitor output</label>
+    </div>
     <label>Monitor device</label>
     <select id=""monitorDevice""></select>
 
     <h3>Preview</h3>
-    <label>Preview enabled</label>
-    <input id=""previewEnabled"" type=""checkbox"" />
+    <div class=""check-row"">
+      <input id=""previewEnabled"" type=""checkbox"" />
+      <label for=""previewEnabled"">Preview enabled</label>
+    </div>
     <label>Preview outputs</label>
-    <div id=""previewOutputs""></div>
+    <div id=""previewOutputs"" class=""check-grid""></div>
 
     <details>
       <summary>Advanced settings</summary>
@@ -391,6 +517,8 @@ async function buildFramebufferOptions(framebuffers) {
 async function loadDevices() {
   const res = await fetch('/api/devices');
   const data = await res.json();
+  const mode = data.displayMode === 'desktop' ? 'Desktop UI running' : 'Console mode';
+  document.getElementById('displayMode').innerText = `Display mode: ${mode}`;
   document.getElementById('audioInputs').innerText = data.audioInputs;
   document.getElementById('audioOutputs').innerText = data.audioOutputs;
   document.getElementById('videoDevices').innerText = data.videoDevices.join('\n');
@@ -410,12 +538,13 @@ async function loadDevices() {
   outputsContainer.innerHTML = '';
   fbOptions.forEach(opt => {
     const wrapper = document.createElement('label');
+    wrapper.className = 'check-item';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.value = opt.value;
     checkbox.checked = (config.preview.outputDevices || []).includes(opt.value);
     wrapper.appendChild(checkbox);
-    wrapper.appendChild(document.createTextNode(' ' + opt.label));
+    wrapper.appendChild(document.createTextNode(opt.label));
     outputsContainer.appendChild(wrapper);
   });
 }

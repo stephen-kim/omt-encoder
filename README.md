@@ -41,6 +41,12 @@ LCD 설치를 다시 실행하려면:
 sudo rm -f /var/lib/omt-encode/lcd_installed
 ```
 
+HDMI 해상도를 강제로 480x320으로 고정하고 싶다면:
+
+```bash
+LCD_HDMI_FORCE=1 ./build_and_install_service.sh
+```
+
 > LCD-show 설치는 재부팅이 발생할 수 있습니다. 재부팅 후 스크립트를 다시 실행하세요.
 
 ## 요구사항

@@ -25,11 +25,13 @@ sudo echo "dtparam=i2c_arm=on" >> ./boot/config.txt.bak
 sudo echo "dtparam=spi=on" >> ./boot/config.txt.bak
 sudo echo "enable_uart=1" >> ./boot/config.txt.bak
 sudo echo "dtoverlay=tft35a:rotate=90" >> ./boot/config.txt.bak
+if [ "${LCD_HDMI_FORCE:-0}" = "1" ]; then
 sudo echo "hdmi_group=2" >> ./boot/config.txt.bak
 sudo echo "hdmi_mode=1" >> ./boot/config.txt.bak
 sudo echo "hdmi_mode=87" >> ./boot/config.txt.bak
 sudo echo "hdmi_cvt 480 320 60 6 0 0 0" >> ./boot/config.txt.bak
 sudo echo "hdmi_drive=2" >> ./boot/config.txt.bak
+fi
 sudo cp -rf ./boot/config.txt.bak /boot/config.txt
 
 sudo cp -rf ./usr/99-calibration.conf-35-90  /etc/X11/xorg.conf.d/99-calibration.conf
