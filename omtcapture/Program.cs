@@ -50,7 +50,6 @@ namespace omtcapture
 
                 Settings settings = Settings.Load(configFilename);
                 AudioPipeline? audioPipeline = null;
-                PreviewPipeline? previewPipeline = null;
                 VideoPipeline? videoPipeline = null;
                 WebServer? webServer = null;
 
@@ -59,10 +58,8 @@ namespace omtcapture
                     audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
                     audioPipeline.Start();
 
-                    previewPipeline = new PreviewPipeline(settings.Preview, settings.Video);
-                    previewPipeline.Start();
-
                     videoPipeline = new VideoPipeline(send, SendLock, settings.Video);
+                    videoPipeline.UpdatePreview(settings.Preview);
                     videoPipeline.Start();
 
                     if (settings.Web.Enabled)
@@ -70,7 +67,7 @@ namespace omtcapture
                         webServer = new WebServer(settings.Web.Port,
                             () => settings,
                             DeviceProbe.GetSnapshot,
-                            update => ApplyUpdate(update, ref settings, configFilename, send, ref audioPipeline, ref previewPipeline, ref videoPipeline));
+                            update => ApplyUpdate(update, ref settings, configFilename, send, ref audioPipeline, ref videoPipeline));
                         webServer.Start();
                     }
 
@@ -81,7 +78,6 @@ namespace omtcapture
                 }
 
                 audioPipeline?.Stop();
-                previewPipeline?.Stop();
                 videoPipeline?.Stop();
                 webServer?.Dispose();
             }
@@ -104,7 +100,6 @@ namespace omtcapture
             string configPath,
             OMTSend send,
             ref AudioPipeline? audioPipeline,
-            ref PreviewPipeline? previewPipeline,
             ref VideoPipeline? videoPipeline)
         {
             bool videoChanged;
@@ -138,9 +133,7 @@ namespace omtcapture
 
             if (previewChanged)
             {
-                previewPipeline?.Stop();
-                previewPipeline = new PreviewPipeline(settings.Preview, settings.Video);
-                previewPipeline.Start();
+                videoPipeline?.UpdatePreview(settings.Preview);
             }
 
             if (videoChanged)
@@ -205,6 +198,7 @@ namespace omtcapture
         {
             return left.Enabled == right.Enabled &&
                 left.OutputDevice == right.OutputDevice &&
+                left.OutputDevices.SequenceEqual(right.OutputDevices) &&
                 left.Width == right.Width &&
                 left.Height == right.Height &&
                 left.Fps == right.Fps &&
@@ -247,6 +241,7 @@ namespace omtcapture
         {
             target.Enabled = source.Enabled;
             target.OutputDevice = source.OutputDevice;
+            target.OutputDevices = new List<string>(source.OutputDevices);
             target.Width = source.Width;
             target.Height = source.Height;
             target.Fps = source.Fps;

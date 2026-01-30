@@ -12,7 +12,12 @@ namespace omtcapture
         private CancellationTokenSource? _cts;
         private Thread? _thread;
         private VideoSettings _settings;
+        private PreviewSettings _previewSettings = new();
+        private PreviewPipeline? _previewPipeline;
+        private readonly List<PreviewPipeline> _previewPipelines = new();
+        private readonly object _previewLock = new();
         private volatile bool _restartRequested;
+        private volatile bool _previewRestartRequested;
 
         public VideoPipeline(OMTSend send, object sendLock, VideoSettings settings)
         {
@@ -41,6 +46,15 @@ namespace omtcapture
             _restartRequested = true;
         }
 
+        public void UpdatePreview(PreviewSettings settings)
+        {
+            lock (_previewLock)
+            {
+                _previewSettings = Clone(settings);
+            }
+            _previewRestartRequested = true;
+        }
+
         public void Stop()
         {
             if (_cts == null)
@@ -53,6 +67,7 @@ namespace omtcapture
             _cts.Dispose();
             _cts = null;
             _thread = null;
+            StopPreview();
         }
 
         public void Dispose()
@@ -149,10 +164,18 @@ namespace omtcapture
 
             Console.WriteLine("Format: " + fmt.ToString());
 
+            StartPreviewIfEnabled(fmt);
+
             capture.StartCapture();
             CaptureFrame captureFrame = new CaptureFrame();
             while (!token.IsCancellationRequested && !_restartRequested)
             {
+                if (_previewRestartRequested)
+                {
+                    RestartPreview(fmt);
+                    _previewRestartRequested = false;
+                }
+
                 if (capture.GetNextFrame(ref captureFrame))
                 {
                     frame.Data = captureFrame.Data;
@@ -173,10 +196,16 @@ namespace omtcapture
                         frameCount = 0;
                         sentLength = 0;
                     }
+
+                    foreach (PreviewPipeline pipeline in _previewPipelines)
+                    {
+                        pipeline.SubmitFrame(captureFrame.Data, captureFrame.Length);
+                    }
                 }
             }
 
             capture.StopCapture();
+            StopPreview();
         }
 
         private static VideoSettings Clone(VideoSettings settings)
@@ -190,6 +219,73 @@ namespace omtcapture
                 FrameRateN = settings.FrameRateN,
                 FrameRateD = settings.FrameRateD,
                 Codec = settings.Codec
+            };
+        }
+
+        private static PreviewSettings Clone(PreviewSettings settings)
+        {
+            return new PreviewSettings
+            {
+                Enabled = settings.Enabled,
+                OutputDevice = settings.OutputDevice,
+                OutputDevices = new List<string>(settings.OutputDevices),
+                Width = settings.Width,
+                Height = settings.Height,
+                Fps = settings.Fps,
+                PixelFormat = settings.PixelFormat
+            };
+        }
+
+        private void StartPreviewIfEnabled(CaptureFormat fmt)
+        {
+            PreviewSettings settings;
+            lock (_previewLock)
+            {
+                settings = Clone(_previewSettings);
+            }
+            if (!settings.Enabled)
+            {
+                return;
+            }
+
+            string inputPixelFormat = ResolveInputPixelFormat(fmt.Codec);
+            List<string> outputs = settings.OutputDevices.Count > 0
+                ? settings.OutputDevices
+                : new List<string> { settings.OutputDevice };
+
+            foreach (string output in outputs.Distinct())
+            {
+                PreviewSettings perOutput = Clone(settings);
+                perOutput.OutputDevice = output;
+                PreviewPipeline pipeline = new PreviewPipeline(perOutput, inputPixelFormat, fmt.Width, fmt.Height);
+                pipeline.Start();
+                _previewPipelines.Add(pipeline);
+            }
+        }
+
+        private void RestartPreview(CaptureFormat fmt)
+        {
+            StopPreview();
+            StartPreviewIfEnabled(fmt);
+        }
+
+        private void StopPreview()
+        {
+            foreach (PreviewPipeline pipeline in _previewPipelines)
+            {
+                pipeline.Stop();
+            }
+            _previewPipelines.Clear();
+        }
+
+        private static string ResolveInputPixelFormat(int codec)
+        {
+            return codec switch
+            {
+                (int)OMTCodec.UYVY => "uyvy422",
+                (int)OMTCodec.YUY2 => "yuyv422",
+                (int)OMTCodec.NV12 => "nv12",
+                _ => "yuyv422"
             };
         }
     }

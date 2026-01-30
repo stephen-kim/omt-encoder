@@ -5,14 +5,23 @@ namespace omtcapture
     internal sealed class PreviewPipeline : IDisposable
     {
         private readonly PreviewSettings _settings;
-        private readonly VideoSettings _video;
+        private readonly string _inputPixelFormat;
+        private readonly int _inputWidth;
+        private readonly int _inputHeight;
         private Process? _process;
+        private Stream? _stdin;
         private Task? _stderrTask;
+        private byte[] _buffer = Array.Empty<byte>();
+        private long _lastFrameTicks;
+        private long _frameIntervalTicks;
 
-        public PreviewPipeline(PreviewSettings settings, VideoSettings video)
+        public PreviewPipeline(PreviewSettings settings, string inputPixelFormat, int inputWidth, int inputHeight)
         {
             _settings = settings;
-            _video = video;
+            _inputPixelFormat = inputPixelFormat;
+            _inputWidth = inputWidth;
+            _inputHeight = inputHeight;
+            _frameIntervalTicks = TimeSpan.FromSeconds(1.0 / Math.Max(1, _settings.Fps)).Ticks;
         }
 
         public void Start()
@@ -24,8 +33,10 @@ namespace omtcapture
 
             try
             {
-                string args = $"-loglevel error -f video4linux2 -video_size {_settings.Width}x{_settings.Height} -framerate {_settings.Fps} -i {_video.DevicePath} -vf format={_settings.PixelFormat} -f fbdev {_settings.OutputDevice}";
+                string filter = BuildFilter();
+                string args = $"-loglevel error -f rawvideo -pix_fmt {_inputPixelFormat} -s {_inputWidth}x{_inputHeight} -r {_settings.Fps} -i pipe:0 -vf {filter} -f fbdev {_settings.OutputDevice}";
                 _process = StartProcess("ffmpeg", args);
+                _stdin = _process.StandardInput.BaseStream;
                 _stderrTask = Task.Run(() => ReadStderr(_process));
             }
             catch (Exception ex)
@@ -33,6 +44,29 @@ namespace omtcapture
                 Console.WriteLine($"Preview pipeline error: {ex.Message}");
                 _process = null;
             }
+        }
+
+        public void SubmitFrame(IntPtr data, int length)
+        {
+            if (!_settings.Enabled || _stdin == null)
+            {
+                return;
+            }
+
+            long nowTicks = DateTime.UtcNow.Ticks;
+            if (nowTicks - _lastFrameTicks < _frameIntervalTicks)
+            {
+                return;
+            }
+            _lastFrameTicks = nowTicks;
+
+            if (_buffer.Length != length)
+            {
+                _buffer = new byte[length];
+            }
+
+            System.Runtime.InteropServices.Marshal.Copy(data, _buffer, 0, length);
+            _stdin.Write(_buffer, 0, length);
         }
 
         public void Stop()
@@ -56,6 +90,7 @@ namespace omtcapture
 
             _process.Dispose();
             _process = null;
+            _stdin = null;
             _stderrTask = null;
         }
 
@@ -101,6 +136,16 @@ namespace omtcapture
             {
                 // Ignore stderr read failures.
             }
+        }
+
+        private string BuildFilter()
+        {
+            string filter = $"format={_settings.PixelFormat}";
+            if (_settings.Width != _inputWidth || _settings.Height != _inputHeight)
+            {
+                filter = $"scale={_settings.Width}:{_settings.Height}:flags=fast_bilinear,{filter}";
+            }
+            return filter;
         }
     }
 }

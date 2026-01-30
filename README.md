@@ -149,7 +149,7 @@ http://<pi-ip>:8080/
 설정 가능 항목:
 - 오디오 입력 선택 (HDMI / TRS / 둘 다 / 끔)
 - 모니터링 출력 장치 선택 (aplay -D)
-- SPI/HDMI 프리뷰 출력 on/off 및 framebuffer 선택
+- SPI/HDMI 프리뷰 출력 on/off 및 framebuffer 선택 (복수 선택 가능)
 - 영상 입력 장치/해상도/프레임레이트/코덱 변경
 - 장치 목록(arecord/aplay, /dev/video*, /dev/fb*) 확인
 
@@ -176,6 +176,14 @@ aplay -l
 
 ffmpeg를 이용해 `/dev/fb*` framebuffer로 프리뷰를 출력합니다.
 LCD 쇼가 사용하는 framebuffer 해상도에 맞게 웹 UI에서 preview 설정을 맞춰주세요.
+
+HDMI에서 OS UI와 충돌을 피하려면 부팅을 콘솔 모드로 바꾸는 것을 권장합니다.
+
+```bash
+sudo raspi-config
+```
+
+`1 System Options` → `S5 Boot / Auto Login` → `B1 Console` (또는 `B2 Console Autologin`)
 
 ## 설정 파일
 

@@ -261,6 +261,7 @@ namespace omtcapture
     {
         public bool Enabled { get; set; } = false;
         public string OutputDevice { get; set; } = "/dev/fb0";
+        public List<string> OutputDevices { get; set; } = new();
         public int Width { get; set; }
         public int Height { get; set; }
         public int Fps { get; set; } = 30;
@@ -278,7 +279,24 @@ namespace omtcapture
             }
 
             settings.Enabled = ReadBool(root, "enabled", settings.Enabled);
+            XmlNodeList? outputs = root.SelectNodes("output");
+            if (outputs != null && outputs.Count > 0)
+            {
+                foreach (XmlNode node in outputs)
+                {
+                    if (!string.IsNullOrWhiteSpace(node.InnerText))
+                    {
+                        settings.OutputDevices.Add(node.InnerText.Trim());
+                    }
+                }
+            }
+
             settings.OutputDevice = ReadString(root, "output", settings.OutputDevice);
+            if (settings.OutputDevices.Count == 0 && !string.IsNullOrWhiteSpace(settings.OutputDevice))
+            {
+                settings.OutputDevices.Add(settings.OutputDevice);
+            }
+
             settings.Width = ReadInt(root, "width", settings.Width);
             settings.Height = ReadInt(root, "height", settings.Height);
             settings.Fps = ReadInt(root, "fps", settings.Fps);
@@ -293,7 +311,17 @@ namespace omtcapture
             root.AppendChild(preview);
 
             AppendChild(doc, preview, "enabled", Enabled ? "true" : "false");
-            AppendChild(doc, preview, "output", OutputDevice);
+            if (OutputDevices.Count > 0)
+            {
+                foreach (string output in OutputDevices)
+                {
+                    AppendChild(doc, preview, "output", output);
+                }
+            }
+            else
+            {
+                AppendChild(doc, preview, "output", OutputDevice);
+            }
             AppendChild(doc, preview, "width", Width.ToString());
             AppendChild(doc, preview, "height", Height.ToString());
             AppendChild(doc, preview, "fps", Fps.ToString());

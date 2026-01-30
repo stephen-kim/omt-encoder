@@ -263,8 +263,8 @@ details { margin-top: 8px; }
     <h3>Preview</h3>
     <label>Preview enabled</label>
     <input id=""previewEnabled"" type=""checkbox"" />
-    <label>Framebuffer output</label>
-    <select id=""previewOutput""></select>
+    <label>Preview outputs</label>
+    <div id=""previewOutputs""></div>
 
     <details>
       <summary>Advanced settings</summary>
@@ -329,6 +329,25 @@ function setSelectOptions(selectId, options, selectedValue) {
   });
 }
 
+function setPreviewOutputs(selected) {
+  const container = document.getElementById('previewOutputs');
+  const selectedSet = new Set(selected);
+  container.querySelectorAll('input[type=checkbox]').forEach(input => {
+    input.checked = selectedSet.has(input.value);
+  });
+}
+
+function getPreviewOutputs() {
+  const container = document.getElementById('previewOutputs');
+  const outputs = [];
+  container.querySelectorAll('input[type=checkbox]').forEach(input => {
+    if (input.checked) {
+      outputs.push(input.value);
+    }
+  });
+  return outputs;
+}
+
 function parseAlsaDevices(text) {
   const lines = text.split('\n');
   const devices = [];
@@ -387,7 +406,18 @@ async function loadDevices() {
   setSelectOptions('trsDevice', inputs, config.audio.trsDevice);
   setSelectOptions('monitorDevice', outputs, config.audio.monitor.device);
   setSelectOptions('videoDevicePath', videoOptions, config.video.devicePath);
-  setSelectOptions('previewOutput', fbOptions, config.preview.outputDevice);
+  const outputsContainer = document.getElementById('previewOutputs');
+  outputsContainer.innerHTML = '';
+  fbOptions.forEach(opt => {
+    const wrapper = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = opt.value;
+    checkbox.checked = (config.preview.outputDevices || []).includes(opt.value);
+    wrapper.appendChild(checkbox);
+    wrapper.appendChild(document.createTextNode(' ' + opt.label));
+    outputsContainer.appendChild(wrapper);
+  });
 }
 
 async function loadConfig() {
@@ -409,6 +439,7 @@ async function loadConfig() {
   document.getElementById('monitorGain').value = data.audio.monitor.gain;
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
+  setPreviewOutputs(data.preview.outputDevices || []);
   document.getElementById('previewWidth').value = data.preview.width;
   document.getElementById('previewHeight').value = data.preview.height;
   document.getElementById('previewFps').value = data.preview.fps;
@@ -438,7 +469,7 @@ async function saveConfig() {
   payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
-  payload.preview.outputDevice = document.getElementById('previewOutput').value;
+  payload.preview.outputDevices = getPreviewOutputs();
   payload.preview.width = Number(document.getElementById('previewWidth').value);
   payload.preview.height = Number(document.getElementById('previewHeight').value);
   payload.preview.fps = Number(document.getElementById('previewFps').value);
