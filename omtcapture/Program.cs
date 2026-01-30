@@ -24,9 +24,6 @@
 */
 
 using libomtnet;
-using V4L2;
-using omtcapture.capture;
-using System.Xml;
 
 namespace omtcapture
 {
@@ -34,6 +31,8 @@ namespace omtcapture
     {
 
         static bool running = true;
+        static readonly object SendLock = new();
+        static readonly object SettingsLock = new();
         static void Main(string[] args)
         {
             try
@@ -44,113 +43,47 @@ namespace omtcapture
                 string configFilename = Path.Combine(AppContext.BaseDirectory, "config.xml");
                 if (!File.Exists(configFilename))
                 {
-                    Console.WriteLine("config.xml file not found");
-                    return;
+                    Settings defaults = new Settings();
+                    defaults.Save(configFilename);
+                    Console.WriteLine("config.xml not found. Created default config.");
                 }
 
-                XmlDocument config = new XmlDocument();
-                config.Load(configFilename);
+                Settings settings = Settings.Load(configFilename);
+                AudioPipeline? audioPipeline = null;
+                PreviewPipeline? previewPipeline = null;
+                VideoPipeline? videoPipeline = null;
+                WebServer? webServer = null;
 
-                XmlNode? settings = config.SelectSingleNode("settings");
-                if (settings == null) { Console.WriteLine("config.xml missing settings element"); return;  }
-
-                XmlNode? n = settings.SelectSingleNode("name");
-                if (n == null) { Console.WriteLine("config.xml missing settings/name"); return; }
-                string name = n.InnerText;
-
-                n = settings.SelectSingleNode("devicePath");
-                if (n == null) { Console.WriteLine("config.xml missing settings/devicePath"); return; }
-                string devicePath = n.InnerText;
-
-                OMTMediaFrame frame = new OMTMediaFrame();
-                frame.Type = OMTFrameType.Video;
-                frame.ColorSpace = OMTColorSpace.BT709;
-
-                n = settings.SelectSingleNode("width");
-                if (n == null) { Console.WriteLine("config.xml missing settings/width"); return; }
-                frame.Width = int.Parse(n.InnerText);
-
-                n = settings.SelectSingleNode("height");
-                if (n == null) { Console.WriteLine("config.xml missing settings/height"); return; }
-                frame.Height = int.Parse(n.InnerText);
-
-                n = settings.SelectSingleNode("frameRateN");
-                if (n == null) { Console.WriteLine("config.xml missing settings/frameRateN"); return; }
-                frame.FrameRateN = int.Parse(n.InnerText);
-
-                n = settings.SelectSingleNode("frameRateD");
-                if (n == null) { Console.WriteLine("config.xml missing settings/frameRateD"); return; }
-                frame.FrameRateD = int.Parse(n.InnerText);
-
-                n = settings.SelectSingleNode("codec");
-                if (n == null) { Console.WriteLine("config.xml missing settings/codec"); return; }
-
-                switch (n.InnerText)
+                using (OMTSend send = new OMTSend(settings.Video.Name, OMTQuality.Default))
                 {
-                    case "UYVY":
-                        frame.Codec = (int)OMTCodec.UYVY;
-                        frame.Stride = frame.Width * 2;
-                        break;
-                    case "YUY2":
-                        frame.Codec = (int)OMTCodec.YUY2;
-                        frame.Stride = frame.Width * 2;
-                        break;
-                    case "NV12":
-                        frame.Codec = (int)OMTCodec.NV12;
-                        frame.Stride = frame.Width;
-                        break;
-                    default:
-                        Console.WriteLine("Codec not supported"); return;
-                }  
-                frame.AspectRatio = (float)frame.Width / (float)frame.Height;                
+                    audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
+                    audioPipeline.Start();
 
-                CaptureFormat fmt = new CaptureFormat(frame.Codec, frame.Width, frame.Height, frame.Stride, frame.FrameRateN, frame.FrameRateD);
+                    previewPipeline = new PreviewPipeline(settings.Preview, settings.Video);
+                    previewPipeline.Start();
 
-                int frameCount = 0;
-                long sentLength = 0;
-                using (OMTSend send = new OMTSend(name, OMTQuality.Default))
-                {
-                    using (CaptureDevice capture = new V4L2Capture(devicePath, fmt))
+                    videoPipeline = new VideoPipeline(send, SendLock, settings.Video);
+                    videoPipeline.Start();
+
+                    if (settings.Web.Enabled)
                     {
-                        fmt = capture.Format;
-                        if (fmt.Codec == (int)V4L2Unmanaged.PIXEL_FORMAT_YUYV)
-                        {
-                            fmt.Codec = (int)OMTCodec.YUY2;
-                        }
+                        webServer = new WebServer(settings.Web.Port,
+                            () => settings,
+                            DeviceProbe.GetSnapshot,
+                            update => ApplyUpdate(update, ref settings, configFilename, send, ref audioPipeline, ref previewPipeline, ref videoPipeline));
+                        webServer.Start();
+                    }
 
-                        frame.Codec = fmt.Codec;
-                        frame.Width = fmt.Width;
-                        frame.Height = fmt.Height;
-                        frame.Stride = fmt.Stride;
-                        frame.FrameRateD = fmt.FrameRateD;
-                        frame.FrameRateN = fmt.FrameRateN;
-
-                        Console.WriteLine("Format: " + fmt.ToString());
-
-                        capture.StartCapture();
-                        CaptureFrame captureFrame = new CaptureFrame();
-                        while (running)
-                        {
-                            if (capture.GetNextFrame(ref captureFrame))
-                            {
-                                frame.Data = captureFrame.Data;
-                                frame.DataLength = captureFrame.Length;
-                                frame.Timestamp = captureFrame.Timestamp;
-
-                                int networkSend = send.Send(frame);
-                                frameCount += 1;
-                                sentLength += networkSend;
-                                if (frameCount >= 60)
-                                {
-                                    Console.WriteLine("Sent " + frameCount +" frames, " + sentLength + " bytes.");
-                                    frameCount = 0;
-                                    sentLength = 0;
-                                }
-                            }
-                        }
-                        capture.StopCapture();
+                    while (running)
+                    {
+                        Thread.Sleep(200);
                     }
                 }
+
+                audioPipeline?.Stop();
+                previewPipeline?.Stop();
+                videoPipeline?.Stop();
+                webServer?.Dispose();
             }
             catch (Exception ex)
             {
@@ -163,6 +96,167 @@ namespace omtcapture
         {
             e.Cancel = true;
             running = false;
+        }
+
+        private static UpdateResult ApplyUpdate(
+            SettingsUpdate update,
+            ref Settings settings,
+            string configPath,
+            OMTSend send,
+            ref AudioPipeline? audioPipeline,
+            ref PreviewPipeline? previewPipeline,
+            ref VideoPipeline? videoPipeline)
+        {
+            bool videoChanged;
+            bool audioChanged;
+            bool previewChanged;
+            bool webChanged;
+            bool nameChanged;
+
+            lock (SettingsLock)
+            {
+                videoChanged = !VideoEquals(settings.Video, update.Video);
+                audioChanged = !AudioEquals(settings.Audio, update.Audio);
+                previewChanged = !PreviewEquals(settings.Preview, update.Preview);
+                webChanged = !WebEquals(settings.Web, update.Web);
+                nameChanged = settings.Video.Name != update.Video.Name;
+
+                CopyVideo(settings.Video, update.Video);
+                CopyAudio(settings.Audio, update.Audio);
+                CopyPreview(settings.Preview, update.Preview);
+                CopyWeb(settings.Web, update.Web);
+
+                settings.Save(configPath);
+            }
+
+            if (audioChanged)
+            {
+                audioPipeline?.Stop();
+                audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
+                audioPipeline.Start();
+            }
+
+            if (previewChanged)
+            {
+                previewPipeline?.Stop();
+                previewPipeline = new PreviewPipeline(settings.Preview, settings.Video);
+                previewPipeline.Start();
+            }
+
+            if (videoChanged)
+            {
+                videoPipeline?.Update(settings.Video);
+            }
+
+            return new UpdateResult
+            {
+                Ok = true,
+                VideoRestartRequired = false,
+                Message = BuildUpdateMessage(videoChanged, webChanged, nameChanged)
+            };
+        }
+
+        private static string BuildUpdateMessage(bool videoChanged, bool webChanged, bool nameChanged)
+        {
+            if (webChanged)
+            {
+                return "Saved. Web port changes require restart.";
+            }
+
+            if (videoChanged && nameChanged)
+            {
+                return "Saved. Video updated. Source name change requires restart.";
+            }
+
+            return "Saved. Changes applied.";
+        }
+
+        private static bool VideoEquals(VideoSettings left, VideoSettings right)
+        {
+            return left.Name == right.Name &&
+                left.DevicePath == right.DevicePath &&
+                left.Width == right.Width &&
+                left.Height == right.Height &&
+                left.FrameRateN == right.FrameRateN &&
+                left.FrameRateD == right.FrameRateD &&
+                left.Codec == right.Codec;
+        }
+
+        private static bool AudioEquals(AudioSettings left, AudioSettings right)
+        {
+            return left.Mode == right.Mode &&
+                left.HdmiDevice == right.HdmiDevice &&
+                left.TrsDevice == right.TrsDevice &&
+                left.SampleRate == right.SampleRate &&
+                left.Channels == right.Channels &&
+                left.SamplesPerChannel == right.SamplesPerChannel &&
+                Math.Abs(left.MixGain - right.MixGain) < 0.0001f &&
+                MonitorEquals(left.Monitor, right.Monitor);
+        }
+
+        private static bool MonitorEquals(MonitorSettings left, MonitorSettings right)
+        {
+            return left.Enabled == right.Enabled &&
+                left.Device == right.Device &&
+                Math.Abs(left.Gain - right.Gain) < 0.0001f;
+        }
+
+        private static bool PreviewEquals(PreviewSettings left, PreviewSettings right)
+        {
+            return left.Enabled == right.Enabled &&
+                left.OutputDevice == right.OutputDevice &&
+                left.Width == right.Width &&
+                left.Height == right.Height &&
+                left.Fps == right.Fps &&
+                left.PixelFormat == right.PixelFormat;
+        }
+
+        private static bool WebEquals(WebSettings left, WebSettings right)
+        {
+            return left.Enabled == right.Enabled &&
+                left.Port == right.Port;
+        }
+
+        private static void CopyVideo(VideoSettings target, VideoSettings source)
+        {
+            target.Name = source.Name;
+            target.DevicePath = source.DevicePath;
+            target.Width = source.Width;
+            target.Height = source.Height;
+            target.FrameRateN = source.FrameRateN;
+            target.FrameRateD = source.FrameRateD;
+            target.Codec = source.Codec;
+        }
+
+        private static void CopyAudio(AudioSettings target, AudioSettings source)
+        {
+            target.Mode = source.Mode;
+            target.HdmiDevice = source.HdmiDevice;
+            target.TrsDevice = source.TrsDevice;
+            target.SampleRate = source.SampleRate;
+            target.Channels = source.Channels;
+            target.SamplesPerChannel = source.SamplesPerChannel;
+            target.MixGain = source.MixGain;
+
+            target.Monitor.Enabled = source.Monitor.Enabled;
+            target.Monitor.Device = source.Monitor.Device;
+            target.Monitor.Gain = source.Monitor.Gain;
+        }
+
+        private static void CopyPreview(PreviewSettings target, PreviewSettings source)
+        {
+            target.Enabled = source.Enabled;
+            target.OutputDevice = source.OutputDevice;
+            target.Width = source.Width;
+            target.Height = source.Height;
+            target.Fps = source.Fps;
+            target.PixelFormat = source.PixelFormat;
+        }
+
+        private static void CopyWeb(WebSettings target, WebSettings source)
+        {
+            target.Enabled = source.Enabled;
+            target.Port = source.Port;
         }
     }
 }

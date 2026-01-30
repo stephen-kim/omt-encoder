@@ -3,7 +3,10 @@ Description=OMT Capture
 After=network.target
 
 [Service]
+WorkingDirectory=/opt/omtcapture
 ExecStart=/opt/omtcapture/omtcapture
+Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

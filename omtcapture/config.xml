@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <settings>
   <name>Video</name>
   <!--V4L2 Device Path-->
@@ -9,4 +9,31 @@
   <frameRateD>1001</frameRateD>
   <!--Supported Formats: UYVY, YUY2, NV12-->
   <codec>UYVY</codec>
+  <audio>
+    <!--none | hdmi | trs | both-->
+    <mode>both</mode>
+    <hdmiDevice>hw:3,0</hdmiDevice>
+    <trsDevice>hw:2,0</trsDevice>
+    <sampleRate>48000</sampleRate>
+    <channels>2</channels>
+    <samplesPerChannel>480</samplesPerChannel>
+    <mixGain>0.5</mixGain>
+    <monitor>
+      <enabled>true</enabled>
+      <device>default</device>
+      <gain>1.0</gain>
+    </monitor>
+  </audio>
+  <preview>
+    <enabled>false</enabled>
+    <output>/dev/fb0</output>
+    <width>1920</width>
+    <height>1080</height>
+    <fps>30</fps>
+    <pixelFormat>rgb565le</pixelFormat>
+  </preview>
+  <web>
+    <enabled>true</enabled>
+    <port>8080</port>
+  </web>
 </settings>

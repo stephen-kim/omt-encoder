@@ -1,4 +1,4 @@
-﻿# Open Media Transport (OMT) Encoder for Raspberry Pi 5
+# Open Media Transport (OMT) Encoder for Raspberry Pi 5
 
 **omtcapture** is an encoder for Raspberry Pi 5 which converts USB 3.0 based video capture devices including Webcams
 to an Open Media Transport (OMT) source on the network.
@@ -156,4 +156,3 @@ sudo systemctl status omtcapture
 ```
 
 If successful, the output should show a log entry every 60 frames to confirm encoding is in process.
-
