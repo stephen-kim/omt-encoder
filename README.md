@@ -35,6 +35,12 @@ LCD 설치를 건너뛰려면:
 SKIP_LCD=1 ./build_and_install_service.sh
 ```
 
+LCD 설치를 다시 실행하려면:
+
+```bash
+sudo rm -f /var/lib/omt-encode/lcd_installed
+```
+
 > LCD-show 설치는 재부팅이 발생할 수 있습니다. 재부팅 후 스크립트를 다시 실행하세요.
 
 ## 요구사항

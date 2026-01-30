@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture}"
+LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is intended for Raspberry Pi OS (Linux)."
@@ -23,13 +24,22 @@ if ! command -v dotnet >/dev/null 2>&1; then
 fi
 
 if [[ "$SKIP_LCD" != "1" ]]; then
-  if [[ -x "$ROOT_DIR/LCD-show/$LCD_DRIVER" ]]; then
-    echo "Running LCD-show installer ($LCD_DRIVER). This may reboot the device."
-    sudo "$ROOT_DIR/LCD-show/$LCD_DRIVER" || true
-    echo "If the device rebooted, re-run this script to continue."
+  if sudo test -f "$LCD_MARKER"; then
+    echo "LCD-show already installed (marker found: $LCD_MARKER). Skipping."
   else
-    echo "LCD driver script not found: $ROOT_DIR/LCD-show/$LCD_DRIVER"
-    echo "Set LCD_DRIVER to another script name or set SKIP_LCD=1 to skip."
+    if [[ -x "$ROOT_DIR/LCD-show/$LCD_DRIVER" ]]; then
+      echo "Running LCD-show installer ($LCD_DRIVER). This may reboot the device."
+      sudo mkdir -p "$(dirname "$LCD_MARKER")"
+      sudo touch "$LCD_MARKER"
+      pushd "$ROOT_DIR/LCD-show" >/dev/null
+      sudo "./$LCD_DRIVER" || true
+      popd >/dev/null
+      echo "LCD step complete. Reboot may happen; re-run this script to continue build steps."
+      exit 0
+    else
+      echo "LCD driver script not found: $ROOT_DIR/LCD-show/$LCD_DRIVER"
+      echo "Set LCD_DRIVER to another script name or set SKIP_LCD=1 to skip."
+    fi
   fi
 fi
 
