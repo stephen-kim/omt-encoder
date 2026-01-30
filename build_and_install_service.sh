@@ -58,18 +58,23 @@ cd "$ROOT_DIR/omtcapture/build"
 chmod 755 buildlinuxarm64.sh
 ./buildlinuxarm64.sh
 
+if systemctl is-active --quiet omtcapture; then
+  echo "Stopping omtcapture service before install..."
+  sudo systemctl stop omtcapture
+fi
+
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$ROOT_DIR/omtcapture/build/arm64/"* "$INSTALL_DIR/"
 sudo cp "$ROOT_DIR/omtcapture/omtcapture.service" /etc/systemd/system/omtcapture.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable omtcapture
-sudo systemctl start omtcapture
+sudo systemctl restart omtcapture
 
 cat <<MESSAGE
 
 Install complete.
 - Config: $INSTALL_DIR/config.xml
-- Service start: sudo systemctl start omtcapture
+- Service: sudo systemctl restart omtcapture
 - Logs: journalctl -u omtcapture -f
 MESSAGE
