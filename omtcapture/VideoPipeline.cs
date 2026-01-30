@@ -1,3 +1,4 @@
+using System.IO;
 using libomtnet;
 using omtcapture.capture;
 using V4L2;
@@ -13,7 +14,6 @@ namespace omtcapture
         private Thread? _thread;
         private VideoSettings _settings;
         private PreviewSettings _previewSettings = new();
-        private PreviewPipeline? _previewPipeline;
         private readonly List<PreviewPipeline> _previewPipelines = new();
         private readonly object _previewLock = new();
         private volatile bool _restartRequested;
@@ -257,6 +257,16 @@ namespace omtcapture
             {
                 PreviewSettings perOutput = Clone(settings);
                 perOutput.OutputDevice = output;
+                if (TryGetFramebufferSize(output, out int fbWidth, out int fbHeight))
+                {
+                    perOutput.Width = fbWidth;
+                    perOutput.Height = fbHeight;
+                }
+                else if (perOutput.Width <= 0 || perOutput.Height <= 0)
+                {
+                    perOutput.Width = fmt.Width;
+                    perOutput.Height = fmt.Height;
+                }
                 PreviewPipeline pipeline = new PreviewPipeline(perOutput, inputPixelFormat, fmt.Width, fmt.Height);
                 pipeline.Start();
                 _previewPipelines.Add(pipeline);
@@ -287,6 +297,43 @@ namespace omtcapture
                 (int)OMTCodec.NV12 => "nv12",
                 _ => "yuyv422"
             };
+        }
+
+        private static bool TryGetFramebufferSize(string path, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+            try
+            {
+                string fb = Path.GetFileName(path);
+                if (!fb.StartsWith("fb", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                string sizePath = Path.Combine("/sys/class/graphics", fb, "virtual_size");
+                if (!File.Exists(sizePath))
+                {
+                    return false;
+                }
+
+                string[] parts = File.ReadAllText(sizePath).Trim().Split(',');
+                if (parts.Length != 2)
+                {
+                    return false;
+                }
+
+                if (!int.TryParse(parts[0], out width) || !int.TryParse(parts[1], out height))
+                {
+                    return false;
+                }
+
+                return width > 0 && height > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

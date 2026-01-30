@@ -6,6 +6,31 @@ LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture}"
 LCD_MARKER="/var/lib/omt-encode/lcd_installed"
+CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
+CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
+
+CMDLINE_FILE="/boot/firmware/cmdline.txt"
+if [[ ! -f "$CMDLINE_FILE" && -f /boot/cmdline.txt ]]; then
+  CMDLINE_FILE="/boot/cmdline.txt"
+fi
+
+ensure_cmdline_flags() {
+  if [[ "$CMDLINE_TWEAK" != "1" || ! -f "$CMDLINE_FILE" ]]; then
+    return
+  fi
+  local cmdline
+  cmdline="$(cat "$CMDLINE_FILE")"
+  if [[ "$cmdline" != *"fbcon=map:0"* ]]; then
+    cmdline="${cmdline} fbcon=map:0"
+  fi
+  if [[ "$cmdline" != *"logo.nologo"* ]]; then
+    cmdline="${cmdline} logo.nologo"
+  fi
+  if [[ "$CMDLINE_REMOVE_SPLASH" = "1" ]]; then
+    cmdline="${cmdline// splash/}"
+  fi
+  echo "$cmdline" | sudo tee "$CMDLINE_FILE" >/dev/null
+}
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is intended for Raspberry Pi OS (Linux)."
@@ -31,6 +56,7 @@ if [[ "$SKIP_LCD" != "1" ]]; then
       echo "Running LCD-show installer ($LCD_DRIVER). This may reboot the device."
       sudo mkdir -p "$(dirname "$LCD_MARKER")"
       sudo touch "$LCD_MARKER"
+      ensure_cmdline_flags
       pushd "$ROOT_DIR/LCD-show" >/dev/null
       sudo "./$LCD_DRIVER" || true
       popd >/dev/null
@@ -42,6 +68,8 @@ if [[ "$SKIP_LCD" != "1" ]]; then
     fi
   fi
 fi
+
+ensure_cmdline_flags
 
 echo "Building libvmx..."
 cd "$ROOT_DIR/libvmx/build"

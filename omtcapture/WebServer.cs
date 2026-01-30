@@ -95,6 +95,9 @@ namespace omtcapture
                     case "/api/fbname":
                         await HandleFramebufferName(context);
                         break;
+                    case "/api/fbinfo":
+                        await HandleFramebufferInfo(context);
+                        break;
                     case "/api/status":
                         await WriteJson(context, new StatusResponse { Ok = true });
                         break;
@@ -175,6 +178,56 @@ namespace omtcapture
             return WriteJson(context, new FramebufferNameResponse { Name = name ?? string.Empty });
         }
 
+        private Task HandleFramebufferInfo(HttpListenerContext context)
+        {
+            string? path = context.Request.QueryString["path"];
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.Close();
+                return Task.CompletedTask;
+            }
+
+            string name = string.Empty;
+            int width = 0;
+            int height = 0;
+            try
+            {
+                string fb = Path.GetFileName(path);
+                if (fb.StartsWith("fb", StringComparison.OrdinalIgnoreCase))
+                {
+                    string basePath = Path.Combine("/sys/class/graphics", fb);
+                    string namePath = Path.Combine(basePath, "name");
+                    if (File.Exists(namePath))
+                    {
+                        name = File.ReadAllText(namePath).Trim();
+                    }
+
+                    string sizePath = Path.Combine(basePath, "virtual_size");
+                    if (File.Exists(sizePath))
+                    {
+                        string[] parts = File.ReadAllText(sizePath).Trim().Split(',');
+                        if (parts.Length == 2)
+                        {
+                            int.TryParse(parts[0], out width);
+                            int.TryParse(parts[1], out height);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return WriteJson(context, new FramebufferInfoResponse
+            {
+                Name = name,
+                Width = width,
+                Height = height
+            });
+        }
+
         private Task WriteJson(HttpListenerContext context, object payload)
         {
             JsonTypeInfo? typeInfo = GetTypeInfo(payload);
@@ -202,6 +255,7 @@ namespace omtcapture
                 DeviceSnapshot => OmcJsonContext.Default.DeviceSnapshot,
                 StatusResponse => OmcJsonContext.Default.StatusResponse,
                 FramebufferNameResponse => OmcJsonContext.Default.FramebufferNameResponse,
+                FramebufferInfoResponse => OmcJsonContext.Default.FramebufferInfoResponse,
                 _ => null
             };
         }
@@ -412,10 +466,6 @@ details { margin-top: 10px; }
       <input id=""audioMixGain"" type=""number"" step=""0.01"" />
       <label>Monitor gain</label>
       <input id=""monitorGain"" type=""number"" step=""0.01"" />
-      <label>Preview width</label>
-      <input id=""previewWidth"" type=""number"" />
-      <label>Preview height</label>
-      <input id=""previewHeight"" type=""number"" />
       <label>Preview fps</label>
       <input id=""previewFps"" type=""number"" />
       <label>Preview pixel format</label>
@@ -499,11 +549,14 @@ async function buildFramebufferOptions(framebuffers) {
   for (const fb of framebuffers) {
     let label = fb;
     try {
-      const nameRes = await fetch(`/api/fbname?path=${encodeURIComponent(fb)}`);
+      const nameRes = await fetch(`/api/fbinfo?path=${encodeURIComponent(fb)}`);
       if (nameRes.ok) {
         const data = await nameRes.json();
         if (data && data.name) {
           label = `${fb} (${data.name})`;
+        }
+        if (data && data.width && data.height) {
+          label = `${label} ${data.width}x${data.height}`;
         }
       }
     } catch (e) {
@@ -569,8 +622,6 @@ async function loadConfig() {
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
   setPreviewOutputs(data.preview.outputDevices || []);
-  document.getElementById('previewWidth').value = data.preview.width;
-  document.getElementById('previewHeight').value = data.preview.height;
   document.getElementById('previewFps').value = data.preview.fps;
   document.getElementById('previewPixelFormat').value = data.preview.pixelFormat;
 
@@ -599,8 +650,6 @@ async function saveConfig() {
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
   payload.preview.outputDevices = getPreviewOutputs();
-  payload.preview.width = Number(document.getElementById('previewWidth').value);
-  payload.preview.height = Number(document.getElementById('previewHeight').value);
   payload.preview.fps = Number(document.getElementById('previewFps').value);
   payload.preview.pixelFormat = document.getElementById('previewPixelFormat').value;
 

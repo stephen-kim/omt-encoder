@@ -47,6 +47,22 @@ HDMI 해상도를 강제로 480x320으로 고정하고 싶다면:
 LCD_HDMI_FORCE=1 ./build_and_install_service.sh
 ```
 
+콘솔/부트 로고가 SPI 화면에 뜨는 것을 막고 HDMI로 콘솔을 고정하려면:
+
+```bash
+./build_and_install_service.sh
+```
+
+위 스크립트는 기본으로 `/boot/firmware/cmdline.txt`에 아래 플래그를 추가합니다:
+- `fbcon=map:0` (콘솔을 HDMI로 고정)
+- `logo.nologo` (부트 로고 숨김)
+
+스플래시까지 제거하고 싶다면:
+
+```bash
+CMDLINE_REMOVE_SPLASH=1 ./build_and_install_service.sh
+```
+
 > LCD-show 설치는 재부팅이 발생할 수 있습니다. 재부팅 후 스크립트를 다시 실행하세요.
 
 ## 요구사항
