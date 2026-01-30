@@ -9,6 +9,7 @@ namespace omtcapture
     [JsonSerializable(typeof(UpdateResult))]
     [JsonSerializable(typeof(DeviceSnapshot))]
     [JsonSerializable(typeof(StatusResponse))]
+    [JsonSerializable(typeof(FramebufferNameResponse))]
     internal partial class OmcJsonContext : JsonSerializerContext
     {
     }
@@ -16,5 +17,10 @@ namespace omtcapture
     internal sealed class StatusResponse
     {
         public bool Ok { get; set; }
+    }
+
+    internal sealed class FramebufferNameResponse
+    {
+        public string Name { get; set; } = string.Empty;
     }
 }

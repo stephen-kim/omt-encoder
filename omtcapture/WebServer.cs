@@ -92,6 +92,9 @@ namespace omtcapture
                     case "/api/devices":
                         await WriteJson(context, _getDevices());
                         break;
+                    case "/api/fbname":
+                        await HandleFramebufferName(context);
+                        break;
                     case "/api/status":
                         await WriteJson(context, new StatusResponse { Ok = true });
                         break;
@@ -141,6 +144,37 @@ namespace omtcapture
             context.Response.Close();
         }
 
+        private Task HandleFramebufferName(HttpListenerContext context)
+        {
+            string? path = context.Request.QueryString["path"];
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.Close();
+                return Task.CompletedTask;
+            }
+
+            string? name = null;
+            try
+            {
+                string fb = Path.GetFileName(path);
+                if (fb.StartsWith("fb", StringComparison.OrdinalIgnoreCase))
+                {
+                    string namePath = Path.Combine("/sys/class/graphics", fb, "name");
+                    if (File.Exists(namePath))
+                    {
+                        name = File.ReadAllText(namePath).Trim();
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return WriteJson(context, new FramebufferNameResponse { Name = name ?? string.Empty });
+        }
+
         private Task WriteJson(HttpListenerContext context, object payload)
         {
             JsonTypeInfo? typeInfo = GetTypeInfo(payload);
@@ -167,6 +201,7 @@ namespace omtcapture
                 UpdateResult => OmcJsonContext.Default.UpdateResult,
                 DeviceSnapshot => OmcJsonContext.Default.DeviceSnapshot,
                 StatusResponse => OmcJsonContext.Default.StatusResponse,
+                FramebufferNameResponse => OmcJsonContext.Default.FramebufferNameResponse,
                 _ => null
             };
         }
@@ -314,6 +349,26 @@ function parseAlsaDevices(text) {
   return devices;
 }
 
+async function buildFramebufferOptions(framebuffers) {
+  const options = [];
+  for (const fb of framebuffers) {
+    let label = fb;
+    try {
+      const nameRes = await fetch(`/api/fbname?path=${encodeURIComponent(fb)}`);
+      if (nameRes.ok) {
+        const data = await nameRes.json();
+        if (data && data.name) {
+          label = `${fb} (${data.name})`;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    options.push({ value: fb, label });
+  }
+  return options;
+}
+
 async function loadDevices() {
   const res = await fetch('/api/devices');
   const data = await res.json();
@@ -325,7 +380,7 @@ async function loadDevices() {
   const inputs = parseAlsaDevices(data.audioInputs);
   const outputs = parseAlsaDevices(data.audioOutputs);
   const videoOptions = data.videoDevices.map(v => ({ value: v, label: v }));
-  const fbOptions = data.framebuffers.map(f => ({ value: f, label: f }));
+  const fbOptions = await buildFramebufferOptions(data.framebuffers);
 
   const config = await (await fetch('/api/config')).json();
   setSelectOptions('hdmiDevice', inputs, config.audio.hdmiDevice);
@@ -396,8 +451,7 @@ async function saveConfig() {
   document.getElementById('status').innerText = result.message || 'Saved';
 }
 
-loadConfig();
-loadDevices();
+loadConfig().then(loadDevices);
 </script>
 </body>
 </html>";
