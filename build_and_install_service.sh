@@ -64,6 +64,7 @@ sudo cp "$ROOT_DIR/omtcapture/omtcapture.service" /etc/systemd/system/omtcapture
 
 sudo systemctl daemon-reload
 sudo systemctl enable omtcapture
+sudo systemctl start omtcapture
 
 cat <<MESSAGE
 
