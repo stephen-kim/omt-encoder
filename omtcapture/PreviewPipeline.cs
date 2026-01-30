@@ -7,6 +7,7 @@ namespace omtcapture
         private readonly PreviewSettings _settings;
         private readonly VideoSettings _video;
         private Process? _process;
+        private Task? _stderrTask;
 
         public PreviewPipeline(PreviewSettings settings, VideoSettings video)
         {
@@ -25,6 +26,7 @@ namespace omtcapture
             {
                 string args = $"-loglevel error -f video4linux2 -video_size {_settings.Width}x{_settings.Height} -framerate {_settings.Fps} -i {_video.DevicePath} -vf format={_settings.PixelFormat} -f fbdev {_settings.OutputDevice}";
                 _process = StartProcess("ffmpeg", args);
+                _stderrTask = Task.Run(() => ReadStderr(_process));
             }
             catch (Exception ex)
             {
@@ -54,6 +56,7 @@ namespace omtcapture
 
             _process.Dispose();
             _process = null;
+            _stderrTask = null;
         }
 
         public void Dispose()
@@ -79,6 +82,25 @@ namespace omtcapture
 
             process.Start();
             return process;
+        }
+
+        private static void ReadStderr(Process process)
+        {
+            try
+            {
+                string? line;
+                while ((line = process.StandardError.ReadLine()) != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                    {
+                        Console.WriteLine($"Preview ffmpeg: {line}");
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore stderr read failures.
+            }
         }
     }
 }
