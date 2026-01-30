@@ -1,1 +1,1 @@
-dotnet build ../libomtnet.sln -c Release
+dotnet build ../libomtnet.csproj -c Release -f netstandard2.0

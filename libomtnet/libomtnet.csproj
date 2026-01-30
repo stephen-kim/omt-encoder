@@ -8,4 +8,8 @@
     <Version>1.0.0.13</Version>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(OS)'=='Windows_NT'">
+    <DefineConstants>$(DefineConstants);OMT_WIN32</DefineConstants>
+  </PropertyGroup>
+
 </Project>

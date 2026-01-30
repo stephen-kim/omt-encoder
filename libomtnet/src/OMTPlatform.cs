@@ -88,7 +88,11 @@ namespace libomtnet
                     switch (GetPlatformType())
                     {
                         case OMTPlatformType.Win32:
+#if OMT_WIN32
                             instance = new win32.Win32Platform();
+#else
+                            instance = new OMTPlatform();
+#endif
                             break;
                         case OMTPlatformType.MacOS:
                         case OMTPlatformType.iOS:
