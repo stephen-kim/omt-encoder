@@ -93,48 +93,17 @@ namespace omtcapture
                 bool useHdmi = mode == "hdmi" || mode == "both";
                 bool useTrs = mode == "trs" || mode == "both";
 
-                AudioProcessFailure hdmiFailure = AudioProcessFailure.None;
-                AudioProcessFailure trsFailure = AudioProcessFailure.None;
-
-                if (useHdmi)
+                if (!TryStartInputs(useHdmi, useTrs, _settings.SampleRate, channels, out int effectiveRate, out int effectiveChannels))
                 {
-                    _hdmiProcess = StartARecordWithFallback(_settings.HdmiDevice, _settings.SampleRate, channels, out _hdmiFormat, out hdmiFailure);
-                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                    Console.WriteLine("Audio pipeline error: No input devices could be started.");
+                    return;
                 }
 
-                if (useTrs)
-                {
-                    _trsProcess = StartARecordWithFallback(_settings.TrsDevice, _settings.SampleRate, channels, out _trsFormat, out trsFailure);
-                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
-                }
-
-                bool channelsUnsupported = (hdmiFailure == AudioProcessFailure.ChannelsUnsupported) ||
-                                          (trsFailure == AudioProcessFailure.ChannelsUnsupported);
-
-                if (channelsUnsupported && channels > 1)
-                {
-                    Console.WriteLine("Audio pipeline: retrying with mono input.");
-                    StopProcesses();
-                    channels = 1;
-                    hdmiFailure = AudioProcessFailure.None;
-                    trsFailure = AudioProcessFailure.None;
-
-                    if (useHdmi)
-                    {
-                        _hdmiProcess = StartARecordWithFallback(_settings.HdmiDevice, _settings.SampleRate, channels, out _hdmiFormat, out hdmiFailure);
-                        _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
-                    }
-
-                    if (useTrs)
-                    {
-                        _trsProcess = StartARecordWithFallback(_settings.TrsDevice, _settings.SampleRate, channels, out _trsFormat, out trsFailure);
-                        _trsStream = _trsProcess?.StandardOutput.BaseStream;
-                    }
-                }
+                channels = effectiveChannels;
 
                 if (_settings.Monitor.Enabled)
                 {
-                    _monitorProcess = StartAPlayWithFallback(_settings.Monitor.Device, _settings.SampleRate, channels, out _monitorFormat);
+                    _monitorProcess = StartAPlayWithFallback(_settings.Monitor.Device, effectiveRate, channels, out _monitorFormat);
                     _monitorStream = _monitorProcess?.StandardInput.BaseStream;
                 }
 
@@ -159,7 +128,7 @@ namespace omtcapture
                 {
                     Type = OMTFrameType.Audio,
                     Codec = (int)OMTCodec.FPA1,
-                    SampleRate = _settings.SampleRate,
+                    SampleRate = effectiveRate,
                     Channels = channels,
                     SamplesPerChannel = samplesPerChannel,
                     Data = _planarHandle.AddrOfPinnedObject(),
@@ -556,6 +525,83 @@ namespace omtcapture
                 candidates.Add($"plug:hw:{suffix}");
             }
             return candidates.Distinct().ToList();
+        }
+
+        private bool TryStartInputs(bool useHdmi, bool useTrs, int requestedRate, int requestedChannels, out int effectiveRate, out int effectiveChannels)
+        {
+            List<int> rateCandidates = new() { requestedRate, 48000, 44100 };
+            List<int> channelCandidates = new() { requestedChannels, 1 };
+
+            rateCandidates = rateCandidates.Distinct().ToList();
+            channelCandidates = channelCandidates.Distinct().ToList();
+
+            foreach (int rate in rateCandidates)
+            {
+                foreach (int channels in channelCandidates)
+                {
+                    StopProcesses();
+                    bool hdmiOk = !useHdmi || StartInput(_settings.HdmiDevice, rate, channels, out _hdmiProcess, out _hdmiFormat);
+                    bool trsOk = !useTrs || StartInput(_settings.TrsDevice, rate, channels, out _trsProcess, out _trsFormat);
+
+                    if (useHdmi && !hdmiOk)
+                    {
+                        continue;
+                    }
+
+                    if (useTrs && !trsOk)
+                    {
+                        continue;
+                    }
+
+                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                    effectiveRate = rate;
+                    effectiveChannels = channels;
+                    return useHdmi || useTrs;
+                }
+            }
+
+            if (useHdmi && useTrs)
+            {
+                foreach (int rate in rateCandidates)
+                {
+                    foreach (int channels in channelCandidates)
+                    {
+                        StopProcesses();
+                        if (StartInput(_settings.HdmiDevice, rate, channels, out _hdmiProcess, out _hdmiFormat))
+                        {
+                            Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
+                            _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                            _trsStream = null;
+                            effectiveRate = rate;
+                            effectiveChannels = channels;
+                            return true;
+                        }
+
+                        StopProcesses();
+                        if (StartInput(_settings.TrsDevice, rate, channels, out _trsProcess, out _trsFormat))
+                        {
+                            Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
+                            _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                            _hdmiStream = null;
+                            effectiveRate = rate;
+                            effectiveChannels = channels;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            effectiveRate = requestedRate;
+            effectiveChannels = requestedChannels;
+            return false;
+        }
+
+        private bool StartInput(string device, int sampleRate, int channels, out Process? process, out AudioSampleFormat format)
+        {
+            AudioProcessFailure failure;
+            process = StartARecordWithFallback(device, sampleRate, channels, out format, out failure);
+            return process != null;
         }
 
         private void ReleaseBuffers()
