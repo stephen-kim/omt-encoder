@@ -26,6 +26,7 @@ namespace omtcapture
         private GCHandle _planarHandle;
         private float[] _planarBuffer = Array.Empty<float>();
         private float[] _mixBuffer = Array.Empty<float>();
+        private float[] _outputBuffer = Array.Empty<float>();
         private float[] _monitorBuffer = Array.Empty<float>();
         private float[] _tempBuffer1 = Array.Empty<float>();
         private float[] _tempBuffer2 = Array.Empty<float>();
@@ -35,7 +36,10 @@ namespace omtcapture
         private byte[] _readBuffer1 = Array.Empty<byte>();
         private byte[] _readBuffer2 = Array.Empty<byte>();
         private byte[] _writeBuffer = Array.Empty<byte>();
+        private byte[] _writeBuffer = Array.Empty<byte>();
         private bool _running;
+        private DateTime _lastLogTime = DateTime.MinValue;
+
 
         public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
         {
@@ -99,6 +103,8 @@ namespace omtcapture
                     return;
                 }
 
+                Console.WriteLine($"Audio pipeline started. Rate: {effectiveRate}, Channels: {effectiveChannels}");
+
                 channels = effectiveChannels;
 
                 if (_settings.Monitor.Enabled)
@@ -148,6 +154,12 @@ namespace omtcapture
                     }
 
                     MixBuffers(read1, read2, sampleCount);
+
+                    if ((DateTime.Now - _lastLogTime).TotalSeconds >= 5)
+                    {
+                        LogAudioLevels(read1, read2, sampleCount);
+                        _lastLogTime = DateTime.Now;
+                    }
 
                     if (_monitorStream != null && _settings.Monitor.Enabled)
                     {
@@ -601,7 +613,16 @@ namespace omtcapture
         {
             AudioProcessFailure failure;
             process = StartARecordWithFallback(device, sampleRate, channels, out format, out failure);
-            return process != null;
+            if (process != null)
+            {
+                Console.WriteLine($"Started audio input on {device}. Rate: {sampleRate}, Channels: {channels}, Format: {format}");
+                return true;
+            }
+            else
+            {
+                Console.WriteLine($"Failed to start audio input on {device}. Failure reason: {failure}");
+                return false;
+            }
         }
 
         private static DeviceParams? TryReadHwParams(string device)
@@ -746,6 +767,38 @@ namespace omtcapture
             _readBuffer1 = Array.Empty<byte>();
             _readBuffer2 = Array.Empty<byte>();
             _writeBuffer = Array.Empty<byte>();
+        }
+
+        private void LogAudioLevels(bool hasHdmi, bool hasTrs, int sampleCount)
+        {
+            double hdmiRms = -100;
+            double trsRms = -100;
+            double mixRms = -100;
+
+            if (hasHdmi)
+            {
+                hdmiRms = CalculateRms(_tempBuffer1, sampleCount);
+            }
+
+            if (hasTrs)
+            {
+                trsRms = CalculateRms(_tempBuffer2, sampleCount);
+            }
+
+            mixRms = CalculateRms(_mixBuffer, sampleCount);
+
+            Console.WriteLine($"Audio Levels (dB) -> HDMI: {hdmiRms:F1} | TRS: {trsRms:F1} | Mix: {mixRms:F1}");
+        }
+
+        private double CalculateRms(float[] buffer, int count)
+        {
+            double sum = 0;
+            for (int i = 0; i < count; i++)
+            {
+                sum += buffer[i] * buffer[i];
+            }
+            double rms = Math.Sqrt(sum / count);
+            return 20 * Math.Log10(rms + 1e-9); // 1e-9 to avoid log(0)
         }
     }
 
