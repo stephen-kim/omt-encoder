@@ -17,7 +17,7 @@
     <sampleRate>48000</sampleRate>
     <channels>2</channels>
     <samplesPerChannel>480</samplesPerChannel>
-    <mixGain>0.5</mixGain>
+    <mixGain>4.0</mixGain>
     <monitor>
       <enabled>true</enabled>
       <device>default</device>

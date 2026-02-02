@@ -502,8 +502,8 @@ details { margin-top: 10px; }
       <input id=""audioSampleRate"" type=""number"" />
       <label>Channels</label>
       <input id=""audioChannels"" type=""number"" />
-      <label>Mix gain (when both)</label>
-      <input id=""audioMixGain"" type=""number"" step=""0.01"" />
+      <label>Mix gain: <span id=""gainDisplay""></span></label>
+      <input id=""audioMixGain"" type=""range"" min=""0"" max=""10"" step=""0.1"" oninput=""document.getElementById('gainDisplay').innerText = this.value"" />
       <label>Monitor gain</label>
       <input id=""monitorGain"" type=""number"" step=""0.01"" />
       <label>Preview fps</label>
@@ -710,6 +710,7 @@ async function loadConfig() {
   document.getElementById('audioSampleRate').value = data.audio.sampleRate;
   document.getElementById('audioChannels').value = data.audio.channels;
   document.getElementById('audioMixGain').value = data.audio.mixGain;
+  document.getElementById('gainDisplay').innerText = data.audio.mixGain;
   document.getElementById('monitorEnabled').checked = data.audio.monitor.enabled;
   document.getElementById('monitorGain').value = data.audio.monitor.gain;
 

@@ -106,7 +106,7 @@ namespace omtcapture
 
                 channels = effectiveChannels;
 
-                if (_settings.Monitor.Enabled)
+                if (false) // Force disabled to check if monitor is causing overruns/stuttering
                 {
                     _monitorProcess = StartAPlayWithFallback(_settings.Monitor.Device, effectiveRate, channels, out _monitorFormat);
                     _monitorStream = _monitorProcess?.StandardInput.BaseStream;
@@ -148,7 +148,7 @@ namespace omtcapture
 
                     if (!read1 && !read2)
                     {
-                        Thread.Sleep(5);
+                        Thread.Sleep(1);
                         continue;
                     }
 
@@ -213,30 +213,50 @@ namespace omtcapture
         {
             float mixGain = _settings.MixGain;
             float scale = (hasFirst && hasSecond) ? mixGain : 1.0f;
+            int channels = _settings.Channels;
 
-            for (int i = 0; i < sampleCount; i++)
+            if (channels == 2)
             {
-                float sample = 0f;
-                if (hasFirst)
+                // Dual Mono Mode: Mix Left channel only, then duplicate to Right
+                for (int i = 0; i < sampleCount; i += 2)
                 {
-                    sample += _tempBuffer1[i];
-                }
-                if (hasSecond)
-                {
-                    sample += _tempBuffer2[i];
-                }
+                    float sample = 0f;
+                    if (hasFirst)
+                    {
+                        sample += _tempBuffer1[i];
+                    }
+                    if (hasSecond)
+                    {
+                        sample += _tempBuffer2[i];
+                    }
 
-                sample *= scale;
-                if (sample > 1f)
-                {
-                    sample = 1f;
-                }
-                else if (sample < -1f)
-                {
-                    sample = -1f;
-                }
+                    sample *= scale;
+                    sample = Math.Clamp(sample, -1f, 1f);
 
-                _mixBuffer[i] = sample;
+                    _mixBuffer[i] = sample;     // Left
+                    _mixBuffer[i + 1] = sample; // Right (Accessing next index is safe because sampleCount is total samples)
+                }
+            }
+            else
+            {
+                // Standard Mix (Mono or Multichannel 1:1)
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    float sample = 0f;
+                    if (hasFirst)
+                    {
+                        sample += _tempBuffer1[i];
+                    }
+                    if (hasSecond)
+                    {
+                        sample += _tempBuffer2[i];
+                    }
+
+                    sample *= scale;
+                    sample = Math.Clamp(sample, -1f, 1f);
+
+                    _mixBuffer[i] = sample;
+                }
             }
         }
 
@@ -322,7 +342,7 @@ namespace omtcapture
             {
                 // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
                 Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
-                string argsS16 = $"-q -D {candidate} -B 500000 -f S16_LE -c {channels} -r {sampleRate}";
+                string argsS16 = $"-q -D {candidate} -B 500000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
                 {
@@ -338,7 +358,7 @@ namespace omtcapture
                 s16Proc?.Dispose();
 
                 Console.WriteLine($"Attempting audio start on {candidate} (Float32, {channels}ch, {sampleRate}Hz)");
-                string argsFloat = $"-q -D {candidate} -B 500000 -f FLOAT_LE -c {channels} -r {sampleRate}";
+                string argsFloat = $"-q -D {candidate} -B 500000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
                 Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
                 {
@@ -583,8 +603,8 @@ namespace omtcapture
                         continue;
                     }
 
-                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
-                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                    _hdmiStream = _hdmiProcess != null ? new BufferedStream(_hdmiProcess.StandardOutput.BaseStream, 65536) : null;
+                    _trsStream = _trsProcess != null ? new BufferedStream(_trsProcess.StandardOutput.BaseStream, 65536) : null;
                     effectiveRate = rate;
                     effectiveChannels = channels;
                     return useHdmi || useTrs;
@@ -601,7 +621,7 @@ namespace omtcapture
                         if (StartInput(_settings.HdmiDevice, rate, channels, out _hdmiProcess, out _hdmiFormat))
                         {
                             Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
-                            _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                            _hdmiStream = _hdmiProcess != null ? new BufferedStream(_hdmiProcess.StandardOutput.BaseStream, 65536) : null;
                             _trsStream = null;
                             effectiveRate = rate;
                             effectiveChannels = channels;
@@ -612,7 +632,7 @@ namespace omtcapture
                         if (StartInput(_settings.TrsDevice, rate, channels, out _trsProcess, out _trsFormat))
                         {
                             Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
-                            _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                            _trsStream = _trsProcess != null ? new BufferedStream(_trsProcess.StandardOutput.BaseStream, 65536) : null;
                             _hdmiStream = null;
                             effectiveRate = rate;
                             effectiveChannels = channels;
