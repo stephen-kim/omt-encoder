@@ -503,7 +503,7 @@ details { margin-top: 10px; }
       <label>Channels</label>
       <input id=""audioChannels"" type=""number"" />
       <label>Mix gain: <span id=""gainDisplay""></span></label>
-      <input id=""audioMixGain"" type=""range"" min=""0"" max=""10"" step=""0.1"" oninput=""document.getElementById('gainDisplay').innerText = this.value"" />
+      <input id=""audioMixGain"" type=""range"" min=""0"" max=""10"" step=""0.1"" oninput=""document.getElementById('gainDisplay').innerText = this.value"" onchange=""saveConfig()"" />
       <label>Monitor gain</label>
       <input id=""monitorGain"" type=""number"" step=""0.01"" />
       <label>Preview fps</label>

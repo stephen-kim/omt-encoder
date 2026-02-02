@@ -22,6 +22,8 @@ namespace omtcapture
         private Stream? _monitorStream;
         private AudioSampleFormat _hdmiFormat = AudioSampleFormat.Float32;
         private AudioSampleFormat _trsFormat = AudioSampleFormat.Float32;
+        private int _hdmiChannels = 1;
+        private int _trsChannels = 1;
         private AudioSampleFormat _monitorFormat = AudioSampleFormat.Float32;
         private GCHandle _planarHandle;
         private float[] _planarBuffer = Array.Empty<float>();
@@ -96,15 +98,17 @@ namespace omtcapture
                 bool useHdmi = mode == "hdmi" || mode == "both";
                 bool useTrs = mode == "trs" || mode == "both";
 
-                if (!TryStartInputs(useHdmi, useTrs, _settings.SampleRate, channels, out int effectiveRate, out int effectiveChannels))
+                if (!TryStartInputs(useHdmi, useTrs, _settings.SampleRate, Math.Max(1, _settings.Channels), out int effectiveRate))
                 {
                     Console.WriteLine("Audio pipeline error: No input devices could be started.");
                     return;
                 }
 
-                Console.WriteLine($"Audio pipeline started. Rate: {effectiveRate}, Channels: {effectiveChannels}");
+                // FORCE STEREO OUTPUT
+                int outputChannels = 2; // Always output stereo to OMT
+                Console.WriteLine($"Audio pipeline started. Rate: {effectiveRate}, Output Channels: {outputChannels}, HDMI In: {_hdmiChannels}ch, TRS In: {_trsChannels}ch");
 
-                channels = effectiveChannels;
+                channels = outputChannels;
 
                 if (false) // Force disabled to check if monitor is causing overruns/stuttering
                 {
@@ -112,21 +116,29 @@ namespace omtcapture
                     _monitorStream = _monitorProcess?.StandardInput.BaseStream;
                 }
 
-                int sampleCount = channels * samplesPerChannel;
-                int byteCount = sampleCount * sizeof(float);
-                int shortByteCount = sampleCount * sizeof(short);
+                int samplesPerChannel = Math.Max(1, _settings.SamplesPerChannel);
+                int outputSampleCount = outputChannels * samplesPerChannel; // Total samples in a stereo frame
+                int outputByteCount = outputSampleCount * sizeof(float);
+                int outputShortByteCount = outputSampleCount * sizeof(short);
 
-                _mixBuffer = new float[sampleCount];
-                _monitorBuffer = new float[sampleCount];
-                _tempBuffer1 = new float[sampleCount];
-                _tempBuffer2 = new float[sampleCount];
-                _shortBuffer1 = new short[sampleCount];
-                _shortBuffer2 = new short[sampleCount];
-                _monitorShortBuffer = new short[sampleCount];
-                _planarBuffer = new float[sampleCount];
-                _readBuffer1 = new byte[Math.Max(byteCount, shortByteCount)];
-                _readBuffer2 = new byte[Math.Max(byteCount, shortByteCount)];
-                _writeBuffer = new byte[Math.Max(byteCount, shortByteCount)];
+                _mixBuffer = new float[outputSampleCount];
+                _monitorBuffer = new float[outputSampleCount];
+                
+                // Temp buffers size depends on INPUT channels
+                _tempBuffer1 = new float[_hdmiChannels * samplesPerChannel];
+                _tempBuffer2 = new float[_trsChannels * samplesPerChannel];
+                
+                _shortBuffer1 = new short[_tempBuffer1.Length];
+                _shortBuffer2 = new short[_tempBuffer2.Length];
+                _monitorShortBuffer = new short[outputSampleCount];
+                _planarBuffer = new float[outputSampleCount];
+
+                // Read buffers need to be big enough for the largest input
+                int maxInputBytes = Math.Max(_tempBuffer1.Length, _tempBuffer2.Length) * sizeof(float); 
+                _readBuffer1 = new byte[maxInputBytes];
+                _readBuffer2 = new byte[maxInputBytes];
+                _writeBuffer = new byte[Math.Max(outputByteCount, outputShortByteCount)];
+
                 _planarHandle = GCHandle.Alloc(_planarBuffer, GCHandleType.Pinned);
 
                 OMTMediaFrame audioFrame = new OMTMediaFrame
@@ -134,10 +146,10 @@ namespace omtcapture
                     Type = OMTFrameType.Audio,
                     Codec = (int)OMTCodec.FPA1,
                     SampleRate = effectiveRate,
-                    Channels = channels,
+                    Channels = outputChannels,
                     SamplesPerChannel = samplesPerChannel,
                     Data = _planarHandle.AddrOfPinnedObject(),
-                    DataLength = byteCount,
+                    DataLength = outputByteCount,
                     Timestamp = -1
                 };
 
@@ -152,35 +164,36 @@ namespace omtcapture
                         continue;
                     }
 
-                    MixBuffers(read1, read2, sampleCount);
+                    MixBuffersNew(read1, read2, samplesPerChannel);
 
                     if ((DateTime.Now - _lastLogTime).TotalSeconds >= 5)
                     {
-                        LogAudioLevels(read1, read2, sampleCount);
+                        LogAudioLevelsNew(read1, read2, samplesPerChannel);
                         _lastLogTime = DateTime.Now;
                     }
 
-                    if (_monitorStream != null && _settings.Monitor.Enabled)
+                    // Monitor logic uses outputSampleCount (stereo)
+                    if (_monitorStream != null && false) 
                     {
-                        Array.Copy(_mixBuffer, _monitorBuffer, sampleCount);
+                        Array.Copy(_mixBuffer, _monitorBuffer, outputSampleCount);
                         ApplyGain(_monitorBuffer, _settings.Monitor.Gain);
                         try
                         {
                             if (_monitorFormat == AudioSampleFormat.S16)
                             {
-                                for (int i = 0; i < sampleCount; i++)
+                                for (int i = 0; i < outputSampleCount; i++)
                                 {
                                     float sample = _monitorBuffer[i];
                                     sample = Math.Max(-1f, Math.Min(1f, sample));
                                     _monitorShortBuffer[i] = (short)(sample * 32767f);
                                 }
-                                Buffer.BlockCopy(_monitorShortBuffer, 0, _writeBuffer, 0, shortByteCount);
-                                _monitorStream.Write(_writeBuffer, 0, shortByteCount);
+                                Buffer.BlockCopy(_monitorShortBuffer, 0, _writeBuffer, 0, outputShortByteCount);
+                                _monitorStream.Write(_writeBuffer, 0, outputShortByteCount);
                             }
                             else
                             {
-                                Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, byteCount);
-                                _monitorStream.Write(_writeBuffer, 0, byteCount);
+                                Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, outputByteCount);
+                                _monitorStream.Write(_writeBuffer, 0, outputByteCount);
                             }
                         }
                         catch (Exception ex)
@@ -191,7 +204,7 @@ namespace omtcapture
                         }
                     }
 
-                    ConvertToPlanar(channels, samplesPerChannel, sampleCount);
+                    ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
 
                     lock (_sendLock)
                     {
@@ -209,54 +222,57 @@ namespace omtcapture
             }
         }
 
-        private void MixBuffers(bool hasFirst, bool hasSecond, int sampleCount)
+        private void MixBuffersNew(bool hasFirst, bool hasSecond, int frames)
         {
             float mixGain = _settings.MixGain;
-            float scale = (hasFirst && hasSecond) ? mixGain : 1.0f;
-            int channels = _settings.Channels;
-
-            if (channels == 2)
+            // Always output stereo (2 channels)
+            
+            for (int i = 0; i < frames; i++)
             {
-                // Dual Mono Mode: Mix Left channel only, then duplicate to Right
-                for (int i = 0; i < sampleCount; i += 2)
+                float left = 0f;
+                float right = 0f;
+
+                // Mix HDMI
+                if (hasFirst)
                 {
-                    float sample = 0f;
-                    if (hasFirst)
+                    if (_hdmiChannels == 1)
                     {
-                        sample += _tempBuffer1[i];
+                        float val = _tempBuffer1[i]; // Mono
+                        left += val;
+                        right += val;
                     }
-                    if (hasSecond)
+                    else // Stereo or more
                     {
-                        sample += _tempBuffer2[i];
+                        left += _tempBuffer1[i * _hdmiChannels];
+                        right += _tempBuffer1[i * _hdmiChannels + 1];
                     }
-
-                    sample *= scale;
-                    sample = Math.Clamp(sample, -1f, 1f);
-
-                    _mixBuffer[i] = sample;     // Left
-                    _mixBuffer[i + 1] = sample; // Right (Accessing next index is safe because sampleCount is total samples)
                 }
-            }
-            else
-            {
-                // Standard Mix (Mono or Multichannel 1:1)
-                for (int i = 0; i < sampleCount; i++)
+
+                // Mix TRS
+                if (hasSecond)
                 {
-                    float sample = 0f;
-                    if (hasFirst)
+                    if (_trsChannels == 1)
                     {
-                        sample += _tempBuffer1[i];
+                        float val = _tempBuffer2[i]; // Mono
+                        left += val;
+                        right += val;
                     }
-                    if (hasSecond)
+                    else
                     {
-                        sample += _tempBuffer2[i];
+                        left += _tempBuffer2[i * _trsChannels];
+                        right += _tempBuffer2[i * _trsChannels + 1];
                     }
-
-                    sample *= scale;
-                    sample = Math.Clamp(sample, -1f, 1f);
-
-                    _mixBuffer[i] = sample;
                 }
+
+                // Apply Gain & Clamp
+                left *= mixGain;
+                right *= mixGain;
+                
+                left = Math.Clamp(left, -1f, 1f);
+                right = Math.Clamp(right, -1f, 1f);
+
+                _mixBuffer[i * 2] = left;
+                _mixBuffer[i * 2 + 1] = right;
             }
         }
 
@@ -577,73 +593,107 @@ namespace omtcapture
             return candidates.Distinct().ToList();
         }
 
-        private bool TryStartInputs(bool useHdmi, bool useTrs, int requestedRate, int requestedChannels, out int effectiveRate, out int effectiveChannels)
+        private bool TryStartInputs(bool useHdmi, bool useTrs, int requestedRate, int requestedChannels, out int effectiveRate)
         {
+            // We ignore requestedChannels for INPUTS and try to get what we can (1 or 2).
+            // But we prefer 2.
+            
             DeviceParams? hdmiParams = useHdmi ? TryReadHwParams(_settings.HdmiDevice) : null;
             DeviceParams? trsParams = useTrs ? TryReadHwParams(_settings.TrsDevice) : null;
 
             List<int> rateCandidates = BuildRateCandidates(requestedRate, hdmiParams, trsParams);
-            List<int> channelCandidates = BuildChannelCandidates(requestedChannels, hdmiParams, trsParams);
+            // We iterate channels from 2 down to 1
+            List<int> channelCandidates = new() { 2, 1 }; 
 
             foreach (int rate in rateCandidates)
             {
-                foreach (int channels in channelCandidates)
+                StopProcesses();
+                
+                bool hdmiOk = false;
+                if (useHdmi)
                 {
-                    StopProcesses();
-                    bool hdmiOk = !useHdmi || StartInput(_settings.HdmiDevice, rate, channels, out _hdmiProcess, out _hdmiFormat);
-                    bool trsOk = !useTrs || StartInput(_settings.TrsDevice, rate, channels, out _trsProcess, out _trsFormat);
-
-                    if (useHdmi && !hdmiOk)
+                    // Try stereo first, then mono
+                    foreach (int ch in channelCandidates)
                     {
-                        continue;
+                        if (StartInput(_settings.HdmiDevice, rate, ch, out _hdmiProcess, out _hdmiFormat))
+                        {
+                            _hdmiChannels = ch;
+                            hdmiOk = true;
+                            break;
+                        }
                     }
+                }
+                else
+                {
+                    hdmiOk = true;
+                }
 
-                    if (useTrs && !trsOk)
+                bool trsOk = false;
+                if (useTrs)
+                {
+                    foreach (int ch in channelCandidates)
                     {
-                        continue;
+                        if (StartInput(_settings.TrsDevice, rate, ch, out _trsProcess, out _trsFormat))
+                        {
+                            _trsChannels = ch;
+                            trsOk = true;
+                            break;
+                        }
                     }
+                }
+                else
+                {
+                    trsOk = true;
+                }
 
-                    _hdmiStream = _hdmiProcess != null ? new BufferedStream(_hdmiProcess.StandardOutput.BaseStream, 65536) : null;
-                    _trsStream = _trsProcess != null ? new BufferedStream(_trsProcess.StandardOutput.BaseStream, 65536) : null;
+                if (hdmiOk && trsOk)
+                {
+                    // Removed BufferedStream to fix latency/sync issues
+                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
                     effectiveRate = rate;
-                    effectiveChannels = channels;
-                    return useHdmi || useTrs;
+                    return true;
                 }
             }
-
-            if (useHdmi && useTrs)
+            
+            // If we failed to start both, maybe we can start just one? (As per original logic fallback)
+            // For now, let's keep it simple (original logic had fallback, I'll assume success or fail together for simplicity of this edit, 
+            // OR stick to the existing robust fallback flow but decoupled)
+            
+            // Let's implement the fallback if one fails
+             if (useHdmi && useTrs)
             {
-                foreach (int rate in rateCandidates)
-                {
-                    foreach (int channels in channelCandidates)
-                    {
-                        StopProcesses();
-                        if (StartInput(_settings.HdmiDevice, rate, channels, out _hdmiProcess, out _hdmiFormat))
-                        {
-                            Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
-                            _hdmiStream = _hdmiProcess != null ? new BufferedStream(_hdmiProcess.StandardOutput.BaseStream, 65536) : null;
-                            _trsStream = null;
-                            effectiveRate = rate;
-                            effectiveChannels = channels;
-                            return true;
-                        }
-
-                        StopProcesses();
-                        if (StartInput(_settings.TrsDevice, rate, channels, out _trsProcess, out _trsFormat))
-                        {
-                            Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
-                            _trsStream = _trsProcess != null ? new BufferedStream(_trsProcess.StandardOutput.BaseStream, 65536) : null;
-                            _hdmiStream = null;
-                            effectiveRate = rate;
-                            effectiveChannels = channels;
-                            return true;
-                        }
-                    }
-                }
+                 foreach (int rate in rateCandidates)
+                 {
+                     StopProcesses();
+                     // Try HDMI only
+                     foreach (int ch in channelCandidates) {
+                         if (StartInput(_settings.HdmiDevice, rate, ch, out _hdmiProcess, out _hdmiFormat)) {
+                             _hdmiChannels = ch;
+                             _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                             _trsStream = null;
+                             effectiveRate = rate;
+                             Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
+                             return true;
+                         }
+                     }
+                     
+                     StopProcesses();
+                     // Try TRS only
+                     foreach (int ch in channelCandidates) {
+                         if (StartInput(_settings.TrsDevice, rate, ch, out _trsProcess, out _trsFormat)) {
+                             _trsChannels = ch;
+                             _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                             _hdmiStream = null;
+                             effectiveRate = rate;
+                             Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
+                             return true;
+                         }
+                     }
+                 }
             }
 
             effectiveRate = requestedRate;
-            effectiveChannels = requestedChannels;
             return false;
         }
 
@@ -809,7 +859,7 @@ namespace omtcapture
             _writeBuffer = Array.Empty<byte>();
         }
 
-        private void LogAudioLevels(bool hasHdmi, bool hasTrs, int sampleCount)
+        private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)
         {
             double hdmiRms = -100;
             double trsRms = -100;
@@ -817,15 +867,15 @@ namespace omtcapture
 
             if (hasHdmi)
             {
-                hdmiRms = CalculateRms(_tempBuffer1, sampleCount);
+                hdmiRms = CalculateRms(_tempBuffer1, frames * _hdmiChannels);
             }
 
             if (hasTrs)
             {
-                trsRms = CalculateRms(_tempBuffer2, sampleCount);
+                trsRms = CalculateRms(_tempBuffer2, frames * _trsChannels);
             }
 
-            mixRms = CalculateRms(_mixBuffer, sampleCount);
+            mixRms = CalculateRms(_mixBuffer, frames * 2);
 
             Console.WriteLine($"Audio Levels (dB) -> HDMI: {hdmiRms:F1} | TRS: {trsRms:F1} | Mix: {mixRms:F1}");
         }
