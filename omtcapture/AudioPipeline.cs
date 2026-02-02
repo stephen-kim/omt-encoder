@@ -325,6 +325,7 @@ namespace omtcapture
 
         private Process? StartARecordWithFallback(string device, int sampleRate, int channels, out AudioSampleFormat format, out AudioProcessFailure failure)
         {
+            failure = AudioProcessFailure.Other;
             string resolved = ResolveCommandPath("arecord");
             string argsFloat = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
             Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
