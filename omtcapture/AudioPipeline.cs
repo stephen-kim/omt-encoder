@@ -21,6 +21,7 @@ namespace omtcapture
         private Stream? _monitorStream;
         private AudioSampleFormat _hdmiFormat = AudioSampleFormat.Float32;
         private AudioSampleFormat _trsFormat = AudioSampleFormat.Float32;
+        private AudioSampleFormat _monitorFormat = AudioSampleFormat.Float32;
         private GCHandle _planarHandle;
         private float[] _planarBuffer = Array.Empty<float>();
         private float[] _mixBuffer = Array.Empty<float>();
@@ -29,6 +30,7 @@ namespace omtcapture
         private float[] _tempBuffer2 = Array.Empty<float>();
         private short[] _shortBuffer1 = Array.Empty<short>();
         private short[] _shortBuffer2 = Array.Empty<short>();
+        private short[] _monitorShortBuffer = Array.Empty<short>();
         private byte[] _readBuffer1 = Array.Empty<byte>();
         private byte[] _readBuffer2 = Array.Empty<byte>();
         private byte[] _writeBuffer = Array.Empty<byte>();
@@ -85,6 +87,55 @@ namespace omtcapture
             {
                 int channels = Math.Max(1, _settings.Channels);
                 int samplesPerChannel = Math.Max(1, _settings.SamplesPerChannel);
+
+                string mode = _settings.Mode.Trim().ToLowerInvariant();
+                bool useHdmi = mode == "hdmi" || mode == "both";
+                bool useTrs = mode == "trs" || mode == "both";
+
+                AudioProcessFailure hdmiFailure = AudioProcessFailure.None;
+                AudioProcessFailure trsFailure = AudioProcessFailure.None;
+
+                if (useHdmi)
+                {
+                    _hdmiProcess = StartARecordWithFallback(_settings.HdmiDevice, _settings.SampleRate, channels, out _hdmiFormat, out hdmiFailure);
+                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                }
+
+                if (useTrs)
+                {
+                    _trsProcess = StartARecordWithFallback(_settings.TrsDevice, _settings.SampleRate, channels, out _trsFormat, out trsFailure);
+                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                }
+
+                bool channelsUnsupported = (hdmiFailure == AudioProcessFailure.ChannelsUnsupported) ||
+                                          (trsFailure == AudioProcessFailure.ChannelsUnsupported);
+
+                if (channelsUnsupported && channels > 1)
+                {
+                    StopProcesses();
+                    channels = 1;
+                    hdmiFailure = AudioProcessFailure.None;
+                    trsFailure = AudioProcessFailure.None;
+
+                    if (useHdmi)
+                    {
+                        _hdmiProcess = StartARecordWithFallback(_settings.HdmiDevice, _settings.SampleRate, channels, out _hdmiFormat, out hdmiFailure);
+                        _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                    }
+
+                    if (useTrs)
+                    {
+                        _trsProcess = StartARecordWithFallback(_settings.TrsDevice, _settings.SampleRate, channels, out _trsFormat, out trsFailure);
+                        _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                    }
+                }
+
+                if (_settings.Monitor.Enabled)
+                {
+                    _monitorProcess = StartAPlayWithFallback(_settings.Monitor.Device, _settings.SampleRate, channels, out _monitorFormat);
+                    _monitorStream = _monitorProcess?.StandardInput.BaseStream;
+                }
+
                 int sampleCount = channels * samplesPerChannel;
                 int byteCount = sampleCount * sizeof(float);
                 int shortByteCount = sampleCount * sizeof(short);
@@ -95,33 +146,12 @@ namespace omtcapture
                 _tempBuffer2 = new float[sampleCount];
                 _shortBuffer1 = new short[sampleCount];
                 _shortBuffer2 = new short[sampleCount];
+                _monitorShortBuffer = new short[sampleCount];
                 _planarBuffer = new float[sampleCount];
                 _readBuffer1 = new byte[Math.Max(byteCount, shortByteCount)];
                 _readBuffer2 = new byte[Math.Max(byteCount, shortByteCount)];
-                _writeBuffer = new byte[byteCount];
+                _writeBuffer = new byte[Math.Max(byteCount, shortByteCount)];
                 _planarHandle = GCHandle.Alloc(_planarBuffer, GCHandleType.Pinned);
-
-                string mode = _settings.Mode.Trim().ToLowerInvariant();
-                bool useHdmi = mode == "hdmi" || mode == "both";
-                bool useTrs = mode == "trs" || mode == "both";
-
-                if (useHdmi)
-                {
-                    _hdmiProcess = StartARecordWithFallback(_settings.HdmiDevice, _settings.SampleRate, channels, out _hdmiFormat);
-                    _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
-                }
-
-                if (useTrs)
-                {
-                    _trsProcess = StartARecordWithFallback(_settings.TrsDevice, _settings.SampleRate, channels, out _trsFormat);
-                    _trsStream = _trsProcess?.StandardOutput.BaseStream;
-                }
-
-                if (_settings.Monitor.Enabled)
-                {
-                    _monitorProcess = StartAPlay(_settings.Monitor.Device, _settings.SampleRate, channels);
-                    _monitorStream = _monitorProcess?.StandardInput.BaseStream;
-                }
 
                 OMTMediaFrame audioFrame = new OMTMediaFrame
                 {
@@ -152,8 +182,22 @@ namespace omtcapture
                     {
                         Array.Copy(_mixBuffer, _monitorBuffer, sampleCount);
                         ApplyGain(_monitorBuffer, _settings.Monitor.Gain);
-                        Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, byteCount);
-                        _monitorStream.Write(_writeBuffer, 0, _writeBuffer.Length);
+                        if (_monitorFormat == AudioSampleFormat.S16)
+                        {
+                            for (int i = 0; i < sampleCount; i++)
+                            {
+                                float sample = _monitorBuffer[i];
+                                sample = Math.Max(-1f, Math.Min(1f, sample));
+                                _monitorShortBuffer[i] = (short)(sample * 32767f);
+                            }
+                            Buffer.BlockCopy(_monitorShortBuffer, 0, _writeBuffer, 0, shortByteCount);
+                            _monitorStream.Write(_writeBuffer, 0, shortByteCount);
+                        }
+                        else
+                        {
+                            Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, byteCount);
+                            _monitorStream.Write(_writeBuffer, 0, byteCount);
+                        }
                     }
 
                     ConvertToPlanar(channels, samplesPerChannel, sampleCount);
@@ -279,39 +323,64 @@ namespace omtcapture
             return true;
         }
 
-        private Process? StartARecordWithFallback(string device, int sampleRate, int channels, out AudioSampleFormat format)
+        private Process? StartARecordWithFallback(string device, int sampleRate, int channels, out AudioSampleFormat format, out AudioProcessFailure failure)
         {
             string resolved = ResolveCommandPath("arecord");
             string argsFloat = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
             Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
-            if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE"))
+            if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
             {
                 StartStderrReader(floatProc, "arecord");
                 format = AudioSampleFormat.Float32;
+                failure = AudioProcessFailure.None;
                 return floatProc;
             }
 
             floatProc?.Dispose();
             string argsS16 = $"-q -D {device} -f S16_LE -c {channels} -r {sampleRate}";
             Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
-            if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE"))
+            if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
             {
                 StartStderrReader(s16Proc, "arecord");
                 format = AudioSampleFormat.S16;
+                failure = AudioProcessFailure.None;
                 return s16Proc;
             }
 
             s16Proc?.Dispose();
             format = AudioSampleFormat.Float32;
+            if (failure == AudioProcessFailure.None)
+            {
+                failure = AudioProcessFailure.Other;
+            }
             Console.WriteLine($"Audio pipeline error: Failed to start arecord for {device}.");
             return null;
         }
 
-        private Process? StartAPlay(string device, int sampleRate, int channels)
+        private Process? StartAPlayWithFallback(string device, int sampleRate, int channels, out AudioSampleFormat format)
         {
-            string args = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
             string resolved = ResolveCommandPath("aplay");
-            return StartProcess(resolved, args, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: true);
+            string argsFloat = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
+            Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: false);
+            if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out _))
+            {
+                StartStderrReader(floatProc, "aplay");
+                format = AudioSampleFormat.Float32;
+                return floatProc;
+            }
+
+            floatProc?.Dispose();
+            string argsS16 = $"-q -D {device} -f S16_LE -c {channels} -r {sampleRate}";
+            Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: true);
+            if (s16Proc != null)
+            {
+                format = AudioSampleFormat.S16;
+                return s16Proc;
+            }
+
+            format = AudioSampleFormat.Float32;
+            Console.WriteLine($"Audio pipeline error: Failed to start aplay for {device}.");
+            return null;
         }
 
         private Process? StartProcess(string fileName, string args, bool redirectInput, bool redirectOutput, string label, bool readStderr)
@@ -436,19 +505,29 @@ namespace omtcapture
             _ = Task.Run(() => ReadStderr(process, label));
         }
 
-        private static bool ProcessExitedWithError(Process process, string formatLabel)
+        private static bool ProcessExitedWithError(Process process, string formatLabel, out AudioProcessFailure failure)
         {
+            failure = AudioProcessFailure.None;
             try
             {
                 if (process.WaitForExit(200))
                 {
                     string error = process.StandardError.ReadToEnd().Trim();
                     Console.WriteLine($"arecord {formatLabel} failed: {error}");
+                    if (error.Contains("channels count non available", StringComparison.OrdinalIgnoreCase))
+                    {
+                        failure = AudioProcessFailure.ChannelsUnsupported;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        failure = AudioProcessFailure.Other;
+                    }
                     return true;
                 }
             }
             catch
             {
+                failure = AudioProcessFailure.Other;
                 return true;
             }
 
@@ -478,5 +557,12 @@ namespace omtcapture
     {
         Float32,
         S16
+    }
+
+    internal enum AudioProcessFailure
+    {
+        None,
+        ChannelsUnsupported,
+        Other
     }
 }
