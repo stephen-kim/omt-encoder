@@ -91,8 +91,6 @@ namespace omtcapture
         {
             try
             {
-                int channels = Math.Max(1, _settings.Channels);
-                int samplesPerChannel = Math.Max(1, _settings.SamplesPerChannel);
 
                 string mode = _settings.Mode.Trim().ToLowerInvariant();
                 bool useHdmi = mode == "hdmi" || mode == "both";
@@ -108,7 +106,7 @@ namespace omtcapture
                 int outputChannels = 2; // Always output stereo to OMT
                 Console.WriteLine($"Audio pipeline started. Rate: {effectiveRate}, Output Channels: {outputChannels}, HDMI In: {_hdmiChannels}ch, TRS In: {_trsChannels}ch");
 
-                channels = outputChannels;
+                int channels = outputChannels;
 
                 if (false) // Force disabled to check if monitor is causing overruns/stuttering
                 {
