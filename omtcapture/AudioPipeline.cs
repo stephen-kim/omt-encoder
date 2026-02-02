@@ -66,7 +66,8 @@ namespace omtcapture
             _thread = new Thread(Run)
             {
                 IsBackground = true,
-                Name = "AudioPipeline"
+                Name = "AudioPipeline",
+                Priority = ThreadPriority.Highest
             };
             _thread.Start();
         }
@@ -358,7 +359,7 @@ namespace omtcapture
             {
                 // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
                 Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
-                string argsS16 = $"-q -D {candidate} -B 32000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
+                string argsS16 = $"-q -D {candidate} -B 100000 -F 20000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
                 {
@@ -374,7 +375,7 @@ namespace omtcapture
                 s16Proc?.Dispose();
 
                 Console.WriteLine($"Attempting audio start on {candidate} (Float32, {channels}ch, {sampleRate}Hz)");
-                string argsFloat = $"-q -D {candidate} -B 32000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
+                string argsFloat = $"-q -D {candidate} -B 100000 -F 20000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
                 Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
                 {
