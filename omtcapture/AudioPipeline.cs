@@ -108,11 +108,13 @@ namespace omtcapture
 
                 int channels = outputChannels;
 
+                /*
                 if (false) // Force disabled to check if monitor is causing overruns/stuttering
                 {
                     _monitorProcess = StartAPlayWithFallback(_settings.Monitor.Device, effectiveRate, channels, out _monitorFormat);
                     _monitorStream = _monitorProcess?.StandardInput.BaseStream;
                 }
+                */
 
                 int samplesPerChannel = Math.Max(1, _settings.SamplesPerChannel);
                 int outputSampleCount = outputChannels * samplesPerChannel; // Total samples in a stereo frame
@@ -356,7 +358,7 @@ namespace omtcapture
             {
                 // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
                 Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
-                string argsS16 = $"-q -D {candidate} -B 500000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
+                string argsS16 = $"-q -D {candidate} -B 32000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
                 {
@@ -372,7 +374,7 @@ namespace omtcapture
                 s16Proc?.Dispose();
 
                 Console.WriteLine($"Attempting audio start on {candidate} (Float32, {channels}ch, {sampleRate}Hz)");
-                string argsFloat = $"-q -D {candidate} -B 500000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
+                string argsFloat = $"-q -D {candidate} -B 32000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
                 Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
                 {
