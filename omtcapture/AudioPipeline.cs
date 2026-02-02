@@ -529,11 +529,11 @@ namespace omtcapture
 
         private bool TryStartInputs(bool useHdmi, bool useTrs, int requestedRate, int requestedChannels, out int effectiveRate, out int effectiveChannels)
         {
-            List<int> rateCandidates = new() { requestedRate, 48000, 44100 };
-            List<int> channelCandidates = new() { requestedChannels, 1 };
+            DeviceParams? hdmiParams = useHdmi ? TryReadHwParams(_settings.HdmiDevice) : null;
+            DeviceParams? trsParams = useTrs ? TryReadHwParams(_settings.TrsDevice) : null;
 
-            rateCandidates = rateCandidates.Distinct().ToList();
-            channelCandidates = channelCandidates.Distinct().ToList();
+            List<int> rateCandidates = BuildRateCandidates(requestedRate, hdmiParams, trsParams);
+            List<int> channelCandidates = BuildChannelCandidates(requestedChannels, hdmiParams, trsParams);
 
             foreach (int rate in rateCandidates)
             {
@@ -604,6 +604,132 @@ namespace omtcapture
             return process != null;
         }
 
+        private static DeviceParams? TryReadHwParams(string device)
+        {
+            string resolved = ResolveCommandPath("arecord");
+            ProcessStartInfo info = new ProcessStartInfo
+            {
+                FileName = resolved,
+                Arguments = $"-D {device} --dump-hw-params",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            try
+            {
+                using Process process = new Process { StartInfo = info };
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit(1000);
+
+                string combined = string.IsNullOrWhiteSpace(output) ? error : output;
+                if (string.IsNullOrWhiteSpace(combined))
+                {
+                    return null;
+                }
+
+                DeviceParams parameters = new DeviceParams();
+                foreach (string line in combined.Split('\n'))
+                {
+                    string trimmed = line.Trim();
+                    if (trimmed.StartsWith("FORMAT:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        parameters.Formats = ParseTokens(trimmed);
+                    }
+                    else if (trimmed.StartsWith("CHANNELS:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        parameters.Channels = ParseInts(trimmed);
+                    }
+                    else if (trimmed.StartsWith("RATE:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        parameters.Rates = ParseInts(trimmed);
+                    }
+                }
+
+                if (parameters.Formats.Count == 0 && parameters.Channels.Count == 0 && parameters.Rates.Count == 0)
+                {
+                    return null;
+                }
+
+                return parameters;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static List<int> BuildRateCandidates(int requestedRate, DeviceParams? hdmiParams, DeviceParams? trsParams)
+        {
+            List<int> defaults = new() { requestedRate, 48000, 44100 };
+            return BuildCandidateList(defaults, hdmiParams?.Rates, trsParams?.Rates);
+        }
+
+        private static List<int> BuildChannelCandidates(int requestedChannels, DeviceParams? hdmiParams, DeviceParams? trsParams)
+        {
+            List<int> defaults = new() { requestedChannels, 2, 1 };
+            return BuildCandidateList(defaults, hdmiParams?.Channels, trsParams?.Channels);
+        }
+
+        private static List<int> BuildCandidateList(List<int> defaults, List<int>? hdmi, List<int>? trs)
+        {
+            IEnumerable<int> candidates = defaults;
+            if (hdmi != null && hdmi.Count > 0 && trs != null && trs.Count > 0)
+            {
+                candidates = hdmi.Intersect(trs);
+            }
+            else if (hdmi != null && hdmi.Count > 0)
+            {
+                candidates = hdmi;
+            }
+            else if (trs != null && trs.Count > 0)
+            {
+                candidates = trs;
+            }
+
+            List<int> ordered = defaults.Concat(candidates).Distinct().ToList();
+            return ordered;
+        }
+
+        private static List<int> ParseInts(string line)
+        {
+            List<int> values = new();
+            int current = -1;
+            foreach (char ch in line)
+            {
+                if (char.IsDigit(ch))
+                {
+                    int digit = ch - '0';
+                    current = current < 0 ? digit : (current * 10 + digit);
+                }
+                else if (current >= 0)
+                {
+                    values.Add(current);
+                    current = -1;
+                }
+            }
+            if (current >= 0)
+            {
+                values.Add(current);
+            }
+
+            return values.Distinct().ToList();
+        }
+
+        private static List<string> ParseTokens(string line)
+        {
+            int idx = line.IndexOf(':');
+            if (idx == -1)
+            {
+                return new List<string>();
+            }
+            string[] tokens = line[(idx + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return tokens.ToList();
+        }
+
         private void ReleaseBuffers()
         {
             if (_planarHandle.IsAllocated)
@@ -634,5 +760,12 @@ namespace omtcapture
         None,
         ChannelsUnsupported,
         Other
+    }
+
+    internal sealed class DeviceParams
+    {
+        public List<string> Formats { get; set; } = new();
+        public List<int> Channels { get; set; } = new();
+        public List<int> Rates { get; set; } = new();
     }
 }
