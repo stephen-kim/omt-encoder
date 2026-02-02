@@ -36,7 +36,6 @@ namespace omtcapture
         private byte[] _readBuffer1 = Array.Empty<byte>();
         private byte[] _readBuffer2 = Array.Empty<byte>();
         private byte[] _writeBuffer = Array.Empty<byte>();
-        private byte[] _writeBuffer = Array.Empty<byte>();
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
 
