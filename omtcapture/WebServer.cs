@@ -324,6 +324,38 @@ h3 {
   margin: 14px 0 6px;
   color: var(--text);
 }
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.section-title .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #4cc9f0;
+  box-shadow: 0 0 10px rgba(76, 201, 240, 0.4);
+}
+.section-title .pill {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(76, 201, 240, 0.16);
+  color: #8fe3ff;
+  border: 1px solid rgba(76, 201, 240, 0.3);
+}
+.section-title.outputs .dot {
+  background: #ffd666;
+  box-shadow: 0 0 10px rgba(255, 214, 102, 0.45);
+}
+.section-title.outputs .pill {
+  background: rgba(255, 214, 102, 0.18);
+  color: #ffe08a;
+  border-color: rgba(255, 214, 102, 0.35);
+}
 
 section {
   background: linear-gradient(180deg, var(--card), var(--card-2));
@@ -416,7 +448,10 @@ details { margin-top: 10px; }
 
     <div class=""two-col"">
       <div class=""col"">
-        <h3>Inputs</h3>
+        <div class=""section-title"">
+          <span class=""dot""></span>
+          <span class=""pill"">Inputs</span>
+        </div>
         <label>Video device</label>
         <select id=""videoDevicePath""></select>
         <label>Codec</label>
@@ -430,7 +465,10 @@ details { margin-top: 10px; }
         <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
       </div>
       <div class=""col"">
-        <h3>Outputs</h3>
+        <div class=""section-title outputs"">
+          <span class=""dot""></span>
+          <span class=""pill"">Outputs</span>
+        </div>
         <h4>Audio output</h4>
         <div class=""check-row"">
           <input id=""monitorEnabled"" type=""checkbox"" />
