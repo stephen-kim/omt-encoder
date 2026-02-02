@@ -318,6 +318,8 @@ namespace omtcapture
         {
             failure = AudioProcessFailure.Other;
             string resolved = ResolveCommandPath("arecord");
+            foreach (string candidate in BuildDeviceCandidates(device))
+            {
                 // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
                 Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
                 string argsS16 = $"-q -D {candidate} -B 500000 -f S16_LE -c {channels} -r {sampleRate}";
