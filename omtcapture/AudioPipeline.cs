@@ -67,7 +67,7 @@ namespace omtcapture
             {
                 IsBackground = true,
                 Name = "AudioPipeline",
-                Priority = ThreadPriority.Highest
+                Priority = ThreadPriority.AboveNormal
             };
             _thread.Start();
         }
