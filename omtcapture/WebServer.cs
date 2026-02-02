@@ -601,8 +601,14 @@ function parseAlsaDevices(text) {
       const card = match[1];
       const device = match[3];
       const name = match[2].trim();
-      const devLabel = `${name} (hw:${card},${device})`;
-      devices.push({ value: `hw:${card},${device}`, label: devLabel });
+      // Use stable name if valid (alphanumeric+), else fall back to index
+      // ALSA Names from 'arecord -l' are usually safe short IDs.
+      let value = `hw:${card},${device}`;
+      if (/^[a-zA-Z0-9_\-]+$/.test(name)) {
+          value = `hw:CARD=${name},DEV=${device}`;
+      }
+      const devLabel = `${name} (Card ${card}, Dev ${device})`;
+      devices.push({ value: value, label: devLabel });
     }
   }
   if (devices.length === 0) {
