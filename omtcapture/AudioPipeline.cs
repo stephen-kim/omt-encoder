@@ -318,20 +318,8 @@ namespace omtcapture
         {
             failure = AudioProcessFailure.Other;
             string resolved = ResolveCommandPath("arecord");
-            foreach (string candidate in BuildDeviceCandidates(device))
-            {
-                // Added -B 500000 (500ms buffer) to prevent overruns
-                string argsFloat = $"-q -D {candidate} -B 500000 -f FLOAT_LE -c {channels} -r {sampleRate}";
-                Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
-                if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
-                {
-                    StartStderrReader(floatProc, "arecord");
-                    format = AudioSampleFormat.Float32;
-                    failure = AudioProcessFailure.None;
-                    return floatProc;
-                }
-
-                floatProc?.Dispose();
+                // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
+                Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
                 string argsS16 = $"-q -D {candidate} -B 500000 -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
@@ -341,8 +329,27 @@ namespace omtcapture
                     failure = AudioProcessFailure.None;
                     return s16Proc;
                 }
-
+                else
+                {
+                    Console.WriteLine($"Failed {candidate} S16_LE");
+                }
                 s16Proc?.Dispose();
+
+                Console.WriteLine($"Attempting audio start on {candidate} (Float32, {channels}ch, {sampleRate}Hz)");
+                string argsFloat = $"-q -D {candidate} -B 500000 -f FLOAT_LE -c {channels} -r {sampleRate}";
+                Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
+                if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
+                {
+                    StartStderrReader(floatProc, "arecord");
+                    format = AudioSampleFormat.Float32;
+                    failure = AudioProcessFailure.None;
+                    return floatProc;
+                }
+                else
+                {
+                    Console.WriteLine($"Failed {candidate} Float32");
+                }
+                floatProc?.Dispose();
             }
 
             format = AudioSampleFormat.Float32;
