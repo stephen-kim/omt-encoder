@@ -320,7 +320,8 @@ namespace omtcapture
             string resolved = ResolveCommandPath("arecord");
             foreach (string candidate in BuildDeviceCandidates(device))
             {
-                string argsFloat = $"-q -D {candidate} -f FLOAT_LE -c {channels} -r {sampleRate}";
+                // Added -B 500000 (500ms buffer) to prevent overruns
+                string argsFloat = $"-q -D {candidate} -B 500000 -f FLOAT_LE -c {channels} -r {sampleRate}";
                 Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
                 {
@@ -331,7 +332,7 @@ namespace omtcapture
                 }
 
                 floatProc?.Dispose();
-                string argsS16 = $"-q -D {candidate} -f S16_LE -c {channels} -r {sampleRate}";
+                string argsS16 = $"-q -D {candidate} -B 500000 -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
                 {
@@ -699,8 +700,10 @@ namespace omtcapture
 
         private static List<int> BuildChannelCandidates(int requestedChannels, DeviceParams? hdmiParams, DeviceParams? trsParams)
         {
-            List<int> defaults = new() { requestedChannels, 2, 1 };
-            return BuildCandidateList(defaults, hdmiParams?.Channels, trsParams?.Channels);
+            // Always prefer requested channels (usually 2) then fallbacks.
+            // We ignore HW intersection because 'arecord' via 'plughw' can adapt mono HW to stereo.
+            List<int> candidates = new() { requestedChannels, 2, 1 };
+            return candidates.Distinct().ToList();
         }
 
         private static List<int> BuildCandidateList(List<int> defaults, List<int>? hdmi, List<int>? trs)
