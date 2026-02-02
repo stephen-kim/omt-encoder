@@ -420,13 +420,14 @@ details { margin-top: 10px; }
     </select>
 
     <h3>Audio</h3>
-    <label>Audio inputs</label>
+    <h4>Audio inputs</h4>
     <div id=""audioInputDevices"" class=""check-grid""></div>
     <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
     <div class=""check-row"">
       <input id=""monitorEnabled"" type=""checkbox"" />
       <label for=""monitorEnabled"">Monitor output</label>
     </div>
+    <h4>Audio output</h4>
     <label>Monitor device</label>
     <select id=""monitorDevice""></select>
 
