@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace omtcapture
 {
@@ -20,9 +21,10 @@ namespace omtcapture
         {
             try
             {
+                string resolved = ResolveCommandPath(fileName);
                 ProcessStartInfo info = new ProcessStartInfo
                 {
-                    FileName = fileName,
+                    FileName = resolved,
                     Arguments = args,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -51,6 +53,35 @@ namespace omtcapture
             {
                 return $"{fileName} failed: {ex.Message}";
             }
+        }
+
+        private static string ResolveCommandPath(string fileName)
+        {
+            if (fileName.Contains('/'))
+            {
+                return fileName;
+            }
+
+            if (File.Exists(fileName))
+            {
+                return fileName;
+            }
+
+            string[] candidates =
+            {
+                Path.Combine("/usr/bin", fileName),
+                Path.Combine("/bin", fileName)
+            };
+
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return fileName;
         }
 
         private static List<string> ListDeviceNodes(string directory, string pattern)

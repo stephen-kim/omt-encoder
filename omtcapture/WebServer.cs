@@ -420,17 +420,9 @@ details { margin-top: 10px; }
     </select>
 
     <h3>Audio</h3>
-    <label>Audio mode</label>
-    <select id=""audioMode"">
-      <option value=""none"">none</option>
-      <option value=""hdmi"">hdmi</option>
-      <option value=""trs"">trs</option>
-      <option value=""both"">both</option>
-    </select>
-    <label>HDMI input</label>
-    <select id=""hdmiDevice""></select>
-    <label>TRS input</label>
-    <select id=""trsDevice""></select>
+    <label>Audio inputs</label>
+    <div id=""audioInputDevices"" class=""check-grid""></div>
+    <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
     <div class=""check-row"">
       <input id=""monitorEnabled"" type=""checkbox"" />
       <label for=""monitorEnabled"">Monitor output</label>
@@ -524,6 +516,33 @@ function getPreviewOutputs() {
   return outputs;
 }
 
+function getAudioInputSelection() {
+  const container = document.getElementById('audioInputDevices');
+  const outputs = [];
+  container.querySelectorAll('input[type=checkbox]').forEach(input => {
+    if (input.checked) {
+      outputs.push(input.value);
+    }
+  });
+  return outputs;
+}
+
+function limitAudioInputs() {
+  const container = document.getElementById('audioInputDevices');
+  const checked = [];
+  container.querySelectorAll('input[type=checkbox]').forEach(input => {
+    if (input.checked) {
+      checked.push(input);
+    }
+  });
+  if (checked.length <= 2) {
+    return;
+  }
+  checked.slice(2).forEach(input => {
+    input.checked = false;
+  });
+}
+
 function parseAlsaDevices(text) {
   const lines = text.split('\n');
   const devices = [];
@@ -583,10 +602,37 @@ async function loadDevices() {
   const fbOptions = await buildFramebufferOptions(data.framebuffers);
 
   const config = await (await fetch('/api/config')).json();
-  setSelectOptions('hdmiDevice', inputs, config.audio.hdmiDevice);
-  setSelectOptions('trsDevice', inputs, config.audio.trsDevice);
   setSelectOptions('monitorDevice', outputs, config.audio.monitor.device);
   setSelectOptions('videoDevicePath', videoOptions, config.video.devicePath);
+  const audioContainer = document.getElementById('audioInputDevices');
+  audioContainer.innerHTML = '';
+  const selectedAudio = [];
+  if (config.audio.mode === 'both') {
+    if (config.audio.hdmiDevice) {
+      selectedAudio.push(config.audio.hdmiDevice);
+    }
+    if (config.audio.trsDevice) {
+      selectedAudio.push(config.audio.trsDevice);
+    }
+  } else if (config.audio.mode === 'hdmi' && config.audio.hdmiDevice) {
+    selectedAudio.push(config.audio.hdmiDevice);
+  } else if (config.audio.mode === 'trs' && config.audio.trsDevice) {
+    selectedAudio.push(config.audio.trsDevice);
+  }
+  const selectedSet = new Set(selectedAudio);
+  inputs.forEach(opt => {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'check-item';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = opt.value;
+    checkbox.checked = selectedSet.has(opt.value);
+    checkbox.addEventListener('change', limitAudioInputs);
+    wrapper.appendChild(checkbox);
+    wrapper.appendChild(document.createTextNode(opt.label));
+    audioContainer.appendChild(wrapper);
+  });
+  limitAudioInputs();
   const outputsContainer = document.getElementById('previewOutputs');
   outputsContainer.innerHTML = '';
   fbOptions.forEach(opt => {
@@ -613,7 +659,6 @@ async function loadConfig() {
   document.getElementById('videoFrameRateD').value = data.video.frameRateD;
   document.getElementById('videoCodec').value = data.video.codec;
 
-  document.getElementById('audioMode').value = data.audio.mode;
   document.getElementById('audioSampleRate').value = data.audio.sampleRate;
   document.getElementById('audioChannels').value = data.audio.channels;
   document.getElementById('audioMixGain').value = data.audio.mixGain;
@@ -638,9 +683,17 @@ async function saveConfig() {
   payload.video.frameRateD = Number(document.getElementById('videoFrameRateD').value);
   payload.video.codec = document.getElementById('videoCodec').value;
 
-  payload.audio.mode = document.getElementById('audioMode').value;
-  payload.audio.hdmiDevice = document.getElementById('hdmiDevice').value;
-  payload.audio.trsDevice = document.getElementById('trsDevice').value;
+  const selectedInputs = getAudioInputSelection().slice(0, 2);
+  if (selectedInputs.length === 0) {
+    payload.audio.mode = 'none';
+  } else if (selectedInputs.length === 1) {
+    payload.audio.mode = 'hdmi';
+    payload.audio.hdmiDevice = selectedInputs[0];
+  } else {
+    payload.audio.mode = 'both';
+    payload.audio.hdmiDevice = selectedInputs[0];
+    payload.audio.trsDevice = selectedInputs[1];
+  }
   payload.audio.sampleRate = Number(document.getElementById('audioSampleRate').value);
   payload.audio.channels = Number(document.getElementById('audioChannels').value);
   payload.audio.mixGain = Number(document.getElementById('audioMixGain').value);
