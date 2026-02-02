@@ -164,21 +164,30 @@ namespace omtcapture
                     {
                         Array.Copy(_mixBuffer, _monitorBuffer, sampleCount);
                         ApplyGain(_monitorBuffer, _settings.Monitor.Gain);
-                        if (_monitorFormat == AudioSampleFormat.S16)
+                        try
                         {
-                            for (int i = 0; i < sampleCount; i++)
+                            if (_monitorFormat == AudioSampleFormat.S16)
                             {
-                                float sample = _monitorBuffer[i];
-                                sample = Math.Max(-1f, Math.Min(1f, sample));
-                                _monitorShortBuffer[i] = (short)(sample * 32767f);
+                                for (int i = 0; i < sampleCount; i++)
+                                {
+                                    float sample = _monitorBuffer[i];
+                                    sample = Math.Max(-1f, Math.Min(1f, sample));
+                                    _monitorShortBuffer[i] = (short)(sample * 32767f);
+                                }
+                                Buffer.BlockCopy(_monitorShortBuffer, 0, _writeBuffer, 0, shortByteCount);
+                                _monitorStream.Write(_writeBuffer, 0, shortByteCount);
                             }
-                            Buffer.BlockCopy(_monitorShortBuffer, 0, _writeBuffer, 0, shortByteCount);
-                            _monitorStream.Write(_writeBuffer, 0, shortByteCount);
+                            else
+                            {
+                                Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, byteCount);
+                                _monitorStream.Write(_writeBuffer, 0, byteCount);
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Buffer.BlockCopy(_monitorBuffer, 0, _writeBuffer, 0, byteCount);
-                            _monitorStream.Write(_writeBuffer, 0, byteCount);
+                            Console.WriteLine($"Audio pipeline: Monitor failed (disabling): {ex.Message}");
+                            _monitorStream.Close();
+                            _monitorStream = null;
                         }
                     }
 
