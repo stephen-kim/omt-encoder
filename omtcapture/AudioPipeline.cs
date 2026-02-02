@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using System.Linq;
 using libomtnet;
 
 namespace omtcapture
@@ -112,6 +113,7 @@ namespace omtcapture
 
                 if (channelsUnsupported && channels > 1)
                 {
+                    Console.WriteLine("Audio pipeline: retrying with mono input.");
                     StopProcesses();
                     channels = 1;
                     hdmiFailure = AudioProcessFailure.None;
@@ -327,28 +329,32 @@ namespace omtcapture
         {
             failure = AudioProcessFailure.Other;
             string resolved = ResolveCommandPath("arecord");
-            string argsFloat = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
-            Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
-            if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
+            foreach (string candidate in BuildDeviceCandidates(device))
             {
-                StartStderrReader(floatProc, "arecord");
-                format = AudioSampleFormat.Float32;
-                failure = AudioProcessFailure.None;
-                return floatProc;
+                string argsFloat = $"-q -D {candidate} -f FLOAT_LE -c {channels} -r {sampleRate}";
+                Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
+                if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
+                {
+                    StartStderrReader(floatProc, "arecord");
+                    format = AudioSampleFormat.Float32;
+                    failure = AudioProcessFailure.None;
+                    return floatProc;
+                }
+
+                floatProc?.Dispose();
+                string argsS16 = $"-q -D {candidate} -f S16_LE -c {channels} -r {sampleRate}";
+                Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
+                if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
+                {
+                    StartStderrReader(s16Proc, "arecord");
+                    format = AudioSampleFormat.S16;
+                    failure = AudioProcessFailure.None;
+                    return s16Proc;
+                }
+
+                s16Proc?.Dispose();
             }
 
-            floatProc?.Dispose();
-            string argsS16 = $"-q -D {device} -f S16_LE -c {channels} -r {sampleRate}";
-            Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
-            if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
-            {
-                StartStderrReader(s16Proc, "arecord");
-                format = AudioSampleFormat.S16;
-                failure = AudioProcessFailure.None;
-                return s16Proc;
-            }
-
-            s16Proc?.Dispose();
             format = AudioSampleFormat.Float32;
             if (failure == AudioProcessFailure.None)
             {
@@ -361,22 +367,27 @@ namespace omtcapture
         private Process? StartAPlayWithFallback(string device, int sampleRate, int channels, out AudioSampleFormat format)
         {
             string resolved = ResolveCommandPath("aplay");
-            string argsFloat = $"-q -D {device} -f FLOAT_LE -c {channels} -r {sampleRate}";
-            Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: false);
-            if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out _))
+            foreach (string candidate in BuildDeviceCandidates(device))
             {
-                StartStderrReader(floatProc, "aplay");
-                format = AudioSampleFormat.Float32;
-                return floatProc;
-            }
+                string argsFloat = $"-q -D {candidate} -f FLOAT_LE -c {channels} -r {sampleRate}";
+                Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: false);
+                if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out _))
+                {
+                    StartStderrReader(floatProc, "aplay");
+                    format = AudioSampleFormat.Float32;
+                    return floatProc;
+                }
 
-            floatProc?.Dispose();
-            string argsS16 = $"-q -D {device} -f S16_LE -c {channels} -r {sampleRate}";
-            Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: true);
-            if (s16Proc != null)
-            {
-                format = AudioSampleFormat.S16;
-                return s16Proc;
+                floatProc?.Dispose();
+                string argsS16 = $"-q -D {candidate} -f S16_LE -c {channels} -r {sampleRate}";
+                Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: true, redirectOutput: false, label: "aplay", readStderr: true);
+                if (s16Proc != null)
+                {
+                    format = AudioSampleFormat.S16;
+                    return s16Proc;
+                }
+
+                s16Proc?.Dispose();
             }
 
             format = AudioSampleFormat.Float32;
@@ -533,6 +544,18 @@ namespace omtcapture
             }
 
             return false;
+        }
+
+        private static List<string> BuildDeviceCandidates(string device)
+        {
+            List<string> candidates = new() { device };
+            if (device.StartsWith("hw:", StringComparison.OrdinalIgnoreCase))
+            {
+                string suffix = device.Substring(3);
+                candidates.Add($"plughw:{suffix}");
+                candidates.Add($"plug:hw:{suffix}");
+            }
+            return candidates.Distinct().ToList();
         }
 
         private void ReleaseBuffers()
