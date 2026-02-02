@@ -392,6 +392,11 @@ details { margin-top: 10px; }
 .check-row label { margin: 0; font-weight: 600; color: var(--text); }
 .check-grid { display: grid; gap: 8px; margin-top: 8px; }
 .check-item { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 6px; }
+.col { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1219; }
+@media (max-width: 720px) {
+  .two-col { grid-template-columns: 1fr; }
+}
 
 .fade-in { animation: fadeIn 300ms ease-out; }
 
@@ -409,35 +414,39 @@ details { margin-top: 10px; }
     <div id=""status""></div>
     <small id=""displayMode""></small>
 
-    <h3>Video</h3>
-    <label>Video device</label>
-    <select id=""videoDevicePath""></select>
-    <label>Codec</label>
-    <select id=""videoCodec"">
-      <option value=""UYVY"">UYVY</option>
-      <option value=""YUY2"">YUY2</option>
-      <option value=""NV12"">NV12</option>
-    </select>
-
-    <h3>Audio</h3>
-    <h4>Audio inputs</h4>
-    <div id=""audioInputDevices"" class=""check-grid""></div>
-    <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
-    <div class=""check-row"">
-      <input id=""monitorEnabled"" type=""checkbox"" />
-      <label for=""monitorEnabled"">Monitor output</label>
+    <div class=""two-col"">
+      <div class=""col"">
+        <h3>Inputs</h3>
+        <label>Video device</label>
+        <select id=""videoDevicePath""></select>
+        <label>Codec</label>
+        <select id=""videoCodec"">
+          <option value=""UYVY"">UYVY</option>
+          <option value=""YUY2"">YUY2</option>
+          <option value=""NV12"">NV12</option>
+        </select>
+        <h4>Audio inputs</h4>
+        <div id=""audioInputDevices"" class=""check-grid""></div>
+        <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
+      </div>
+      <div class=""col"">
+        <h3>Outputs</h3>
+        <h4>Audio output</h4>
+        <div class=""check-row"">
+          <input id=""monitorEnabled"" type=""checkbox"" />
+          <label for=""monitorEnabled"">Monitor output</label>
+        </div>
+        <label>Monitor device</label>
+        <select id=""monitorDevice""></select>
+        <h4>Preview output</h4>
+        <div class=""check-row"">
+          <input id=""previewEnabled"" type=""checkbox"" />
+          <label for=""previewEnabled"">Preview enabled</label>
+        </div>
+        <label>Preview outputs</label>
+        <div id=""previewOutputs"" class=""check-grid""></div>
+      </div>
     </div>
-    <h4>Audio output</h4>
-    <label>Monitor device</label>
-    <select id=""monitorDevice""></select>
-
-    <h3>Preview</h3>
-    <div class=""check-row"">
-      <input id=""previewEnabled"" type=""checkbox"" />
-      <label for=""previewEnabled"">Preview enabled</label>
-    </div>
-    <label>Preview outputs</label>
-    <div id=""previewOutputs"" class=""check-grid""></div>
 
     <details>
       <summary>Advanced settings</summary>
@@ -547,7 +556,7 @@ function limitAudioInputs() {
 function parseAlsaDevices(text) {
   const lines = text.split('\n');
   const devices = [];
-  const regex = /card\s+(\\d+):\\s*([^,]+),\\s*device\\s+(\\d+):\\s*([^\\[]+)/i;
+  const regex = /card\s+(\d+):\s*([^,]+),\s*device\s+(\d+):\s*([^[]+)/i;
   for (const line of lines) {
     const match = line.match(regex);
     if (match) {
