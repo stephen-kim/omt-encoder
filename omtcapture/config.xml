@@ -5,10 +5,10 @@
   <devicePath>/dev/video0</devicePath>
   <width>1920</width>
   <height>1080</height>
-  <frameRateN>60000</frameRateN>
-  <frameRateD>1001</frameRateD>
+  <frameRateN>30</frameRateN>
+  <frameRateD>1</frameRateD>
   <!--Supported Formats: UYVY, YUY2, NV12-->
-  <codec>UYVY</codec>
+  <codec>NV12</codec>
   <audio>
     <!--none | hdmi | trs | both-->
     <mode>both</mode>
@@ -16,10 +16,10 @@
     <trsDevice>hw:2,0</trsDevice>
     <sampleRate>48000</sampleRate>
     <channels>2</channels>
-    <samplesPerChannel>480</samplesPerChannel>
+    <samplesPerChannel>960</samplesPerChannel>
     <mixGain>4.0</mixGain>
-    <arecordBufferUsec>200000</arecordBufferUsec>
-    <arecordPeriodUsec>50000</arecordPeriodUsec>
+    <arecordBufferUsec>800000</arecordBufferUsec>
+    <arecordPeriodUsec>200000</arecordPeriodUsec>
     <restartAfterFailedReads>5</restartAfterFailedReads>
     <restartCooldownMs>1000</restartCooldownMs>
     <monitor>
