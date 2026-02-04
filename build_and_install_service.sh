@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture}"
+OVERWRITE_CONFIG="${OVERWRITE_CONFIG:-0}"
 LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
 CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
@@ -106,8 +107,10 @@ for file in "$ROOT_DIR/omtcapture/build/arm64/"*; do
   sudo cp "$file" "$INSTALL_DIR/"
 done
 
-if [[ -n "$CONFIG_BACKUP" ]]; then
+if [[ -n "$CONFIG_BACKUP" && "$OVERWRITE_CONFIG" != "1" ]]; then
   sudo cp "$CONFIG_BACKUP" "$INSTALL_DIR/config.xml"
+  rm -f "$CONFIG_BACKUP"
+elif [[ -n "$CONFIG_BACKUP" ]]; then
   rm -f "$CONFIG_BACKUP"
 fi
 sudo cp "$ROOT_DIR/omtcapture/omtcapture.service" /etc/systemd/system/omtcapture.service

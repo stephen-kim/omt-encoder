@@ -55,7 +55,7 @@ namespace omtcapture
         public int Height { get; set; } = 1080;
         public int FrameRateN { get; set; } = 60000;
         public int FrameRateD { get; set; } = 1001;
-        public string Codec { get; set; } = "UYVY";
+        public string Codec { get; set; } = "YUY2";
 
         public static VideoSettings Load(XmlNode root)
         {

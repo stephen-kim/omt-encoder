@@ -8,7 +8,7 @@
   <frameRateN>30</frameRateN>
   <frameRateD>1</frameRateD>
   <!--Supported Formats: UYVY, YUY2, NV12-->
-  <codec>NV12</codec>
+  <codec>YUY2</codec>
   <audio>
     <!--none | hdmi | trs | both-->
     <mode>both</mode>

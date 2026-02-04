@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using libomtnet;
 using omtcapture.capture;
 using V4L2;
@@ -117,19 +119,17 @@ namespace omtcapture
                 ColorSpace = OMTColorSpace.BT709
             };
 
+            int desiredCodec;
             switch (settings.Codec)
             {
                 case "UYVY":
-                    frame.Codec = (int)OMTCodec.UYVY;
-                    frame.Stride = settings.Width * 2;
+                    desiredCodec = (int)OMTCodec.UYVY;
                     break;
                 case "YUY2":
-                    frame.Codec = (int)OMTCodec.YUY2;
-                    frame.Stride = settings.Width * 2;
+                    desiredCodec = (int)OMTCodec.YUY2;
                     break;
                 case "NV12":
-                    frame.Codec = (int)OMTCodec.NV12;
-                    frame.Stride = settings.Width;
+                    desiredCodec = (int)OMTCodec.NV12;
                     break;
                 default:
                     Console.WriteLine("Codec not supported");
@@ -142,7 +142,8 @@ namespace omtcapture
             frame.FrameRateD = settings.FrameRateD;
             frame.AspectRatio = (float)settings.Width / settings.Height;
 
-            CaptureFormat fmt = new CaptureFormat(frame.Codec, frame.Width, frame.Height, frame.Stride, frame.FrameRateN, frame.FrameRateD);
+            int desiredStride = GetStride(desiredCodec, settings.Width);
+            CaptureFormat fmt = new CaptureFormat(desiredCodec, settings.Width, settings.Height, desiredStride, settings.FrameRateN, settings.FrameRateD);
 
             int frameCount = 0;
             long sentLength = 0;
@@ -155,12 +156,24 @@ namespace omtcapture
                 fmt.Codec = (int)OMTCodec.YUY2;
             }
 
-            frame.Codec = fmt.Codec;
-            frame.Width = fmt.Width;
-            frame.Height = fmt.Height;
-            frame.Stride = fmt.Stride;
-            frame.FrameRateD = fmt.FrameRateD;
-            frame.FrameRateN = fmt.FrameRateN;
+            int outputCodec = desiredCodec;
+            int outputWidth = settings.Width;
+            int outputHeight = settings.Height;
+            int outputStride = desiredStride;
+            int outputFrameRateN = settings.FrameRateN;
+            int outputFrameRateD = settings.FrameRateD;
+
+            bool needsTransform = fmt.Width != settings.Width ||
+                fmt.Height != settings.Height ||
+                fmt.Codec != desiredCodec;
+            bool throttleFps = fmt.FrameRateN * outputFrameRateD > outputFrameRateN * fmt.FrameRateD;
+
+            frame.Codec = outputCodec;
+            frame.Width = outputWidth;
+            frame.Height = outputHeight;
+            frame.Stride = outputStride;
+            frame.FrameRateD = outputFrameRateD;
+            frame.FrameRateN = outputFrameRateN;
 
             Console.WriteLine("Format: " + fmt.ToString());
 
@@ -168,6 +181,55 @@ namespace omtcapture
 
             capture.StartCapture();
             CaptureFrame captureFrame = new CaptureFrame();
+            Process? transformProcess = null;
+            Stream? transformInput = null;
+            Stream? transformOutput = null;
+            byte[] transformInputBuffer = Array.Empty<byte>();
+            byte[] transformOutputBuffer = Array.Empty<byte>();
+            GCHandle transformOutputHandle = default;
+            long lastFrameTicks = 0;
+            long frameIntervalTicks = TimeSpan.FromSeconds((double)outputFrameRateD / Math.Max(1, outputFrameRateN)).Ticks;
+
+            if (needsTransform)
+            {
+                try
+                {
+                    transformProcess = StartVideoTransform(fmt, outputCodec, outputWidth, outputHeight, outputFrameRateN, outputFrameRateD);
+                    transformInput = transformProcess.StandardInput.BaseStream;
+                    transformOutput = transformProcess.StandardOutput.BaseStream;
+                    int inputSize = GetFrameSize(fmt.Codec, fmt.Width, fmt.Height);
+                    int outputSize = GetFrameSize(outputCodec, outputWidth, outputHeight);
+                    transformInputBuffer = new byte[inputSize];
+                    transformOutputBuffer = new byte[outputSize];
+                    transformOutputHandle = GCHandle.Alloc(transformOutputBuffer, GCHandleType.Pinned);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Video transform error: {ex.Message}");
+                    transformProcess?.Dispose();
+                    transformProcess = null;
+                }
+            }
+
+            if (needsTransform && transformProcess == null)
+            {
+                Console.WriteLine("Video transform unavailable; sending native format.");
+                outputCodec = fmt.Codec;
+                outputWidth = fmt.Width;
+                outputHeight = fmt.Height;
+                outputStride = fmt.Stride;
+                outputFrameRateN = fmt.FrameRateN;
+                outputFrameRateD = fmt.FrameRateD;
+                frame.Codec = outputCodec;
+                frame.Width = outputWidth;
+                frame.Height = outputHeight;
+                frame.Stride = outputStride;
+                frame.FrameRateN = outputFrameRateN;
+                frame.FrameRateD = outputFrameRateD;
+                frame.AspectRatio = (float)outputWidth / outputHeight;
+                throttleFps = false;
+            }
+
             while (!token.IsCancellationRequested && !_restartRequested)
             {
                 if (_previewRestartRequested)
@@ -178,9 +240,35 @@ namespace omtcapture
 
                 if (capture.GetNextFrame(ref captureFrame))
                 {
+                    if (throttleFps)
+                    {
+                        long nowTicks = DateTime.UtcNow.Ticks;
+                        if (nowTicks - lastFrameTicks < frameIntervalTicks)
+                        {
+                            continue;
+                        }
+                        lastFrameTicks = nowTicks;
+                    }
+
                     frame.Data = captureFrame.Data;
                     frame.DataLength = captureFrame.Length;
                     frame.Timestamp = captureFrame.Timestamp;
+
+                    if (transformProcess != null && transformInput != null && transformOutput != null)
+                    {
+                        int inputSize = transformInputBuffer.Length;
+                        System.Runtime.InteropServices.Marshal.Copy(captureFrame.Data, transformInputBuffer, 0, inputSize);
+                        transformInput.Write(transformInputBuffer, 0, inputSize);
+                        if (!ReadExact(transformOutput, transformOutputBuffer, transformOutputBuffer.Length))
+                        {
+                            Console.WriteLine("Video transform error: short read");
+                            break;
+                        }
+
+                        frame.Data = transformOutputHandle.AddrOfPinnedObject();
+                        frame.DataLength = transformOutputBuffer.Length;
+                        frame.Timestamp = DateTime.UtcNow.Ticks;
+                    }
 
                     int networkSend;
                     lock (_sendLock)
@@ -202,6 +290,26 @@ namespace omtcapture
                         pipeline.SubmitFrame(captureFrame.Data, captureFrame.Length);
                     }
                 }
+            }
+
+            if (transformOutputHandle.IsAllocated)
+            {
+                transformOutputHandle.Free();
+            }
+            if (transformProcess != null)
+            {
+                try
+                {
+                    if (!transformProcess.HasExited)
+                    {
+                        transformProcess.Kill(true);
+                    }
+                }
+                catch
+                {
+                    // Ignore shutdown errors.
+                }
+                transformProcess.Dispose();
             }
 
             capture.StopCapture();
@@ -271,6 +379,98 @@ namespace omtcapture
                 pipeline.Start();
                 _previewPipelines.Add(pipeline);
             }
+        }
+
+        private static int GetStride(int codec, int width)
+        {
+            return codec switch
+            {
+                (int)OMTCodec.NV12 => width,
+                _ => width * 2
+            };
+        }
+
+        private static int GetFrameSize(int codec, int width, int height)
+        {
+            return codec switch
+            {
+                (int)OMTCodec.NV12 => (width * height * 3) / 2,
+                _ => width * height * 2
+            };
+        }
+
+        private static string GetPixelFormat(int codec)
+        {
+            return codec switch
+            {
+                (int)OMTCodec.UYVY => "uyvy422",
+                (int)OMTCodec.YUY2 => "yuyv422",
+                (int)OMTCodec.NV12 => "nv12",
+                _ => "yuyv422"
+            };
+        }
+
+        private static Process StartVideoTransform(CaptureFormat inputFormat, int outputCodec, int outputWidth, int outputHeight, int outputFrameRateN, int outputFrameRateD)
+        {
+            string inputPixFmt = GetPixelFormat(inputFormat.Codec);
+            string outputPixFmt = GetPixelFormat(outputCodec);
+            double inputFps = inputFormat.FrameRateD == 0 ? 30 : (double)inputFormat.FrameRateN / inputFormat.FrameRateD;
+            string filter = $"scale={outputWidth}:{outputHeight}:flags=fast_bilinear,format={outputPixFmt}";
+            string args = $"-loglevel error -f rawvideo -pix_fmt {inputPixFmt} -s {inputFormat.Width}x{inputFormat.Height} -r {inputFps:0.###} -i pipe:0 -vf {filter} -f rawvideo -pix_fmt {outputPixFmt} pipe:1";
+
+            ProcessStartInfo info = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments = args,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            Process process = new Process
+            {
+                StartInfo = info
+            };
+
+            process.Start();
+            _ = Task.Run(() => ReadFfmpegStderr(process));
+            return process;
+        }
+
+        private static void ReadFfmpegStderr(Process process)
+        {
+            try
+            {
+                string? line;
+                while ((line = process.StandardError.ReadLine()) != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                    {
+                        Console.WriteLine($"Video transform: {line}");
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore stderr read failures.
+            }
+        }
+
+        private static bool ReadExact(Stream stream, byte[] buffer, int length)
+        {
+            int offset = 0;
+            while (offset < length)
+            {
+                int read = stream.Read(buffer, offset, length - offset);
+                if (read <= 0)
+                {
+                    return false;
+                }
+                offset += read;
+            }
+            return true;
         }
 
         private void RestartPreview(CaptureFormat fmt)

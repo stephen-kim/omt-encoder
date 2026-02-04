@@ -488,6 +488,13 @@ details { margin-top: 10px; }
 
     <details>
       <summary>Advanced settings</summary>
+      <label>Resolution preset</label>
+      <select id=""videoPreset"" onchange=""applyVideoPreset()"">
+        <option value=""custom"">Custom</option>
+        <option value=""hd-native"">HD (1920x1080, YUY2)</option>
+        <option value=""hd-nv12"">HD (1920x1080, NV12)</option>
+        <option value=""uhd-nv12"">UHD (3840x2160, NV12)</option>
+      </select>
       <label>Source name</label>
       <input id=""videoName"" />
       <label>Width</label>
@@ -640,6 +647,43 @@ async function buildFramebufferOptions(framebuffers) {
   return options;
 }
 
+function applyVideoPreset() {
+  const preset = document.getElementById('videoPreset').value;
+  if (preset === 'hd-native') {
+    document.getElementById('videoWidth').value = 1920;
+    document.getElementById('videoHeight').value = 1080;
+    document.getElementById('videoFrameRateN').value = 30;
+    document.getElementById('videoFrameRateD').value = 1;
+    document.getElementById('videoCodec').value = 'YUY2';
+  } else if (preset === 'hd-nv12') {
+    document.getElementById('videoWidth').value = 1920;
+    document.getElementById('videoHeight').value = 1080;
+    document.getElementById('videoFrameRateN').value = 30;
+    document.getElementById('videoFrameRateD').value = 1;
+    document.getElementById('videoCodec').value = 'NV12';
+  } else if (preset === 'uhd-nv12') {
+    document.getElementById('videoWidth').value = 3840;
+    document.getElementById('videoHeight').value = 2160;
+    document.getElementById('videoFrameRateN').value = 30;
+    document.getElementById('videoFrameRateD').value = 1;
+    document.getElementById('videoCodec').value = 'NV12';
+  }
+}
+
+function detectVideoPreset(width, height) {
+  const codec = document.getElementById('videoCodec').value;
+  if (width === 1920 && height === 1080 && codec === 'YUY2') {
+    return 'hd-native';
+  }
+  if (width === 1920 && height === 1080 && codec === 'NV12') {
+    return 'hd-nv12';
+  }
+  if (width === 3840 && height === 2160 && codec === 'NV12') {
+    return 'uhd-nv12';
+  }
+  return 'custom';
+}
+
 async function loadDevices() {
   const res = await fetch('/api/devices');
   const data = await res.json();
@@ -712,6 +756,7 @@ async function loadConfig() {
   document.getElementById('videoFrameRateN').value = data.video.frameRateN;
   document.getElementById('videoFrameRateD').value = data.video.frameRateD;
   document.getElementById('videoCodec').value = data.video.codec;
+  document.getElementById('videoPreset').value = detectVideoPreset(data.video.width, data.video.height);
 
   document.getElementById('audioSampleRate').value = data.audio.sampleRate;
   document.getElementById('audioChannels').value = data.audio.channels;
