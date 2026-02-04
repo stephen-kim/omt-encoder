@@ -40,6 +40,8 @@ namespace omtcapture
         private byte[] _writeBuffer = Array.Empty<byte>();
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
+        private int _consecutiveReadFailures;
+        private DateTime _lastRestartAttempt = DateTime.MinValue;
 
 
         public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
@@ -122,25 +124,7 @@ namespace omtcapture
                 int outputByteCount = outputSampleCount * sizeof(float);
                 int outputShortByteCount = outputSampleCount * sizeof(short);
 
-                _mixBuffer = new float[outputSampleCount];
-                _monitorBuffer = new float[outputSampleCount];
-                
-                // Temp buffers size depends on INPUT channels
-                _tempBuffer1 = new float[_hdmiChannels * samplesPerChannel];
-                _tempBuffer2 = new float[_trsChannels * samplesPerChannel];
-                
-                _shortBuffer1 = new short[_tempBuffer1.Length];
-                _shortBuffer2 = new short[_tempBuffer2.Length];
-                _monitorShortBuffer = new short[outputSampleCount];
-                _planarBuffer = new float[outputSampleCount];
-
-                // Read buffers need to be big enough for the largest input
-                int maxInputBytes = Math.Max(_tempBuffer1.Length, _tempBuffer2.Length) * sizeof(float); 
-                _readBuffer1 = new byte[maxInputBytes];
-                _readBuffer2 = new byte[maxInputBytes];
-                _writeBuffer = new byte[Math.Max(outputByteCount, outputShortByteCount)];
-
-                _planarHandle = GCHandle.Alloc(_planarBuffer, GCHandleType.Pinned);
+                InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
 
                 OMTMediaFrame audioFrame = new OMTMediaFrame
                 {
@@ -161,10 +145,28 @@ namespace omtcapture
 
                     if (!read1 && !read2)
                     {
-                        Thread.Sleep(10);
+                        _consecutiveReadFailures++;
+                        if (ShouldAttemptRestart())
+                        {
+                            if (TryRestartInputs(outputChannels, samplesPerChannel, ref effectiveRate, ref outputByteCount, ref outputShortByteCount, ref audioFrame))
+                            {
+                                _consecutiveReadFailures = 0;
+                                continue;
+                            }
+                        }
+
+                        // Send silence to avoid audio gaps on the receiver.
+                        Array.Clear(_mixBuffer, 0, _mixBuffer.Length);
+                        ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
+                        lock (_sendLock)
+                        {
+                            _send.Send(audioFrame);
+                        }
+                        Thread.Sleep(5);
                         continue;
                     }
 
+                    _consecutiveReadFailures = 0;
                     MixBuffersNew(read1, read2, samplesPerChannel);
 
                     if ((DateTime.Now - _lastLogTime).TotalSeconds >= 5)
@@ -221,6 +223,80 @@ namespace omtcapture
             {
                 StopProcesses();
             }
+        }
+
+        private void InitializeBuffers(int samplesPerChannel, int outputChannels, int outputByteCount, int outputShortByteCount)
+        {
+            ReleaseBuffers();
+
+            int outputSampleCount = outputChannels * samplesPerChannel;
+            _mixBuffer = new float[outputSampleCount];
+            _monitorBuffer = new float[outputSampleCount];
+
+            // Temp buffers size depends on INPUT channels
+            _tempBuffer1 = new float[_hdmiChannels * samplesPerChannel];
+            _tempBuffer2 = new float[_trsChannels * samplesPerChannel];
+
+            _shortBuffer1 = new short[_tempBuffer1.Length];
+            _shortBuffer2 = new short[_tempBuffer2.Length];
+            _monitorShortBuffer = new short[outputSampleCount];
+            _planarBuffer = new float[outputSampleCount];
+
+            // Read buffers need to be big enough for the largest input
+            int maxInputBytes = Math.Max(_tempBuffer1.Length, _tempBuffer2.Length) * sizeof(float);
+            _readBuffer1 = new byte[maxInputBytes];
+            _readBuffer2 = new byte[maxInputBytes];
+            _writeBuffer = new byte[Math.Max(outputByteCount, outputShortByteCount)];
+
+            _planarHandle = GCHandle.Alloc(_planarBuffer, GCHandleType.Pinned);
+        }
+
+        private bool ShouldAttemptRestart()
+        {
+            if (_settings.RestartAfterFailedReads <= 0)
+            {
+                return false;
+            }
+
+            if (_consecutiveReadFailures < _settings.RestartAfterFailedReads)
+            {
+                return false;
+            }
+
+            int cooldownMs = Math.Max(0, _settings.RestartCooldownMs);
+            return (DateTime.UtcNow - _lastRestartAttempt).TotalMilliseconds >= cooldownMs;
+        }
+
+        private bool TryRestartInputs(int outputChannels, int samplesPerChannel, ref int effectiveRate, ref int outputByteCount, ref int outputShortByteCount, ref OMTMediaFrame audioFrame)
+        {
+            _lastRestartAttempt = DateTime.UtcNow;
+            Console.WriteLine("Audio pipeline: no input data; attempting restart.");
+
+            StopProcesses();
+            string mode = _settings.Mode.Trim().ToLowerInvariant();
+            bool useHdmi = mode == "hdmi" || mode == "both";
+            bool useTrs = mode == "trs" || mode == "both";
+            if (!TryStartInputs(useHdmi,
+                useTrs,
+                _settings.SampleRate,
+                Math.Max(1, _settings.Channels),
+                out int newRate))
+            {
+                return false;
+            }
+
+            effectiveRate = newRate;
+            int outputSampleCount = outputChannels * samplesPerChannel;
+            outputByteCount = outputSampleCount * sizeof(float);
+            outputShortByteCount = outputSampleCount * sizeof(short);
+
+            InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
+            audioFrame.SampleRate = effectiveRate;
+            audioFrame.Data = _planarHandle.AddrOfPinnedObject();
+            audioFrame.DataLength = outputByteCount;
+
+            Console.WriteLine($"Audio pipeline: restart success. Rate: {effectiveRate}, HDMI In: {_hdmiChannels}ch, TRS In: {_trsChannels}ch");
+            return true;
         }
 
         private void MixBuffersNew(bool hasFirst, bool hasSecond, int frames)
@@ -359,7 +435,7 @@ namespace omtcapture
             {
                 // Removed Float32 priority. Trying S16_LE first to avoid static/crackling on some HDMI grabbers.
                 Console.WriteLine($"Attempting audio start on {candidate} (S16_LE, {channels}ch, {sampleRate}Hz)");
-                string argsS16 = $"-q -D {candidate} -B 100000 -F 20000 -t raw -f S16_LE -c {channels} -r {sampleRate}";
+                string argsS16 = $"-q -D {candidate} -B {_settings.ArecordBufferUsec} -F {_settings.ArecordPeriodUsec} -t raw -f S16_LE -c {channels} -r {sampleRate}";
                 Process? s16Proc = StartProcess(resolved, argsS16, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (s16Proc != null && !ProcessExitedWithError(s16Proc, "S16_LE", out failure))
                 {
@@ -375,7 +451,7 @@ namespace omtcapture
                 s16Proc?.Dispose();
 
                 Console.WriteLine($"Attempting audio start on {candidate} (Float32, {channels}ch, {sampleRate}Hz)");
-                string argsFloat = $"-q -D {candidate} -B 100000 -F 20000 -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
+                string argsFloat = $"-q -D {candidate} -B {_settings.ArecordBufferUsec} -F {_settings.ArecordPeriodUsec} -t raw -f FLOAT_LE -c {channels} -r {sampleRate}";
                 Process? floatProc = StartProcess(resolved, argsFloat, redirectInput: false, redirectOutput: true, label: "arecord", readStderr: false);
                 if (floatProc != null && !ProcessExitedWithError(floatProc, "FLOAT_LE", out failure))
                 {

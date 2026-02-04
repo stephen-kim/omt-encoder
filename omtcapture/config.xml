@@ -18,6 +18,10 @@
     <channels>2</channels>
     <samplesPerChannel>480</samplesPerChannel>
     <mixGain>4.0</mixGain>
+    <arecordBufferUsec>200000</arecordBufferUsec>
+    <arecordPeriodUsec>50000</arecordPeriodUsec>
+    <restartAfterFailedReads>5</restartAfterFailedReads>
+    <restartCooldownMs>1000</restartCooldownMs>
     <monitor>
       <enabled>true</enabled>
       <device>default</device>

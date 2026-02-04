@@ -115,6 +115,10 @@ namespace omtcapture
         public int Channels { get; set; } = 2;
         public int SamplesPerChannel { get; set; } = 480;
         public float MixGain { get; set; } = 0.5f;
+        public int ArecordBufferUsec { get; set; } = 200000;
+        public int ArecordPeriodUsec { get; set; } = 50000;
+        public int RestartAfterFailedReads { get; set; } = 5;
+        public int RestartCooldownMs { get; set; } = 1000;
         public MonitorSettings Monitor { get; set; } = new();
 
         public static AudioSettings Load(XmlNode? root)
@@ -132,6 +136,10 @@ namespace omtcapture
             settings.Channels = ReadInt(root, "channels", settings.Channels);
             settings.SamplesPerChannel = ReadInt(root, "samplesPerChannel", settings.SamplesPerChannel);
             settings.MixGain = ReadFloat(root, "mixGain", settings.MixGain);
+            settings.ArecordBufferUsec = ReadInt(root, "arecordBufferUsec", settings.ArecordBufferUsec);
+            settings.ArecordPeriodUsec = ReadInt(root, "arecordPeriodUsec", settings.ArecordPeriodUsec);
+            settings.RestartAfterFailedReads = ReadInt(root, "restartAfterFailedReads", settings.RestartAfterFailedReads);
+            settings.RestartCooldownMs = ReadInt(root, "restartCooldownMs", settings.RestartCooldownMs);
 
             XmlNode? monitorNode = root.SelectSingleNode("monitor");
             settings.Monitor = MonitorSettings.Load(monitorNode);
@@ -151,6 +159,10 @@ namespace omtcapture
             AppendChild(doc, audio, "channels", Channels.ToString());
             AppendChild(doc, audio, "samplesPerChannel", SamplesPerChannel.ToString());
             AppendChild(doc, audio, "mixGain", MixGain.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+            AppendChild(doc, audio, "arecordBufferUsec", ArecordBufferUsec.ToString());
+            AppendChild(doc, audio, "arecordPeriodUsec", ArecordPeriodUsec.ToString());
+            AppendChild(doc, audio, "restartAfterFailedReads", RestartAfterFailedReads.ToString());
+            AppendChild(doc, audio, "restartCooldownMs", RestartCooldownMs.ToString());
 
             Monitor.Save(doc, audio);
         }
