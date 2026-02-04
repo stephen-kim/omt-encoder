@@ -245,12 +245,12 @@ namespace omtcapture
                 {
                     if (throttleFps)
                     {
-                        long nowTicks = DateTime.UtcNow.Ticks;
-                        if (nowTicks - lastFrameTicks < frameIntervalTicks)
+                        long throttleTicks = DateTime.UtcNow.Ticks;
+                        if (throttleTicks - lastFrameTicks < frameIntervalTicks)
                         {
                             continue;
                         }
-                        lastFrameTicks = nowTicks;
+                        lastFrameTicks = throttleTicks;
                     }
 
                     frame.Data = captureFrame.Data;
