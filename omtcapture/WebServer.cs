@@ -454,12 +454,6 @@ details { margin-top: 10px; }
         </div>
         <label>Video device</label>
         <select id=""videoDevicePath""></select>
-        <label>Codec</label>
-        <select id=""videoCodec"">
-          <option value=""UYVY"">UYVY</option>
-          <option value=""YUY2"">YUY2</option>
-          <option value=""NV12"">NV12</option>
-        </select>
         <h4>Audio inputs</h4>
         <div id=""audioInputDevices"" class=""check-grid""></div>
         <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
@@ -493,6 +487,7 @@ details { margin-top: 10px; }
         <option value=""custom"">Custom</option>
         <option value=""hd-native"">HD (1920x1080, YUY2)</option>
         <option value=""hd-nv12"">HD (1920x1080, NV12)</option>
+        <option value=""uhd-yuy2"">UHD (3840x2160, YUY2)</option>
         <option value=""uhd-nv12"">UHD (3840x2160, NV12)</option>
       </select>
       <label>Source name</label>
@@ -505,6 +500,12 @@ details { margin-top: 10px; }
       <input id=""videoFrameRateN"" type=""number"" />
       <label>Frame rate denominator</label>
       <input id=""videoFrameRateD"" type=""number"" />
+      <label>Codec</label>
+      <select id=""videoCodec"">
+        <option value=""UYVY"">UYVY</option>
+        <option value=""YUY2"">YUY2</option>
+        <option value=""NV12"">NV12</option>
+      </select>
       <label>Sample rate</label>
       <input id=""audioSampleRate"" type=""number"" />
       <label>Channels</label>
@@ -661,6 +662,12 @@ function applyVideoPreset() {
     document.getElementById('videoFrameRateN').value = 30;
     document.getElementById('videoFrameRateD').value = 1;
     document.getElementById('videoCodec').value = 'NV12';
+  } else if (preset === 'uhd-yuy2') {
+    document.getElementById('videoWidth').value = 3840;
+    document.getElementById('videoHeight').value = 2160;
+    document.getElementById('videoFrameRateN').value = 30;
+    document.getElementById('videoFrameRateD').value = 1;
+    document.getElementById('videoCodec').value = 'YUY2';
   } else if (preset === 'uhd-nv12') {
     document.getElementById('videoWidth').value = 3840;
     document.getElementById('videoHeight').value = 2160;
@@ -677,6 +684,9 @@ function detectVideoPreset(width, height) {
   }
   if (width === 1920 && height === 1080 && codec === 'NV12') {
     return 'hd-nv12';
+  }
+  if (width === 3840 && height === 2160 && codec === 'YUY2') {
+    return 'uhd-yuy2';
   }
   if (width === 3840 && height === 2160 && codec === 'NV12') {
     return 'uhd-nv12';
