@@ -34,7 +34,8 @@ namespace omtcapture
             _thread = new Thread(() => Run(_cts.Token))
             {
                 IsBackground = true,
-                Name = "VideoPipeline"
+                Name = "VideoPipeline",
+                Priority = ThreadPriority.AboveNormal
             };
             _thread.Start();
         }
@@ -147,6 +148,8 @@ namespace omtcapture
 
             int frameCount = 0;
             long sentLength = 0;
+            long fpsWindowStart = Stopwatch.GetTimestamp();
+            int fpsWindowFrames = 0;
 
             using CaptureDevice capture = new V4L2Capture(settings.DevicePath, fmt);
 
@@ -276,6 +279,7 @@ namespace omtcapture
                         networkSend = _send.Send(frame);
                     }
 
+                    fpsWindowFrames++;
                     frameCount += 1;
                     sentLength += networkSend;
                     if (frameCount >= 60)
@@ -283,6 +287,16 @@ namespace omtcapture
                         Console.WriteLine("Sent " + frameCount + " frames, " + sentLength + " bytes.");
                         frameCount = 0;
                         sentLength = 0;
+                    }
+
+                    long nowTicks = Stopwatch.GetTimestamp();
+                    double elapsedSeconds = (nowTicks - fpsWindowStart) / (double)Stopwatch.Frequency;
+                    if (elapsedSeconds >= 2.0)
+                    {
+                        double fps = fpsWindowFrames / elapsedSeconds;
+                        Console.WriteLine($"Video FPS: {fps:F1} (sent {fpsWindowFrames} frames in {elapsedSeconds:F2}s)");
+                        fpsWindowFrames = 0;
+                        fpsWindowStart = nowTicks;
                     }
 
                     foreach (PreviewPipeline pipeline in _previewPipelines)
