@@ -261,6 +261,7 @@ namespace omtcapture
                         long throttleTicks = DateTime.UtcNow.Ticks;
                         if (throttleTicks - lastFrameTicks < frameIntervalTicks)
                         {
+                            Thread.Sleep(1);
                             continue;
                         }
                         lastFrameTicks = throttleTicks;
@@ -307,6 +308,7 @@ namespace omtcapture
 
                     if (!sent)
                     {
+                        Thread.Sleep(1);
                         continue;
                     }
 
@@ -334,6 +336,10 @@ namespace omtcapture
                     {
                         pipeline.SubmitFrame(captureFrame.Data, captureFrame.Length);
                     }
+                }
+                else
+                {
+                    Thread.Sleep(1);
                 }
             }
 
