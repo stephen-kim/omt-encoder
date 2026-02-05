@@ -192,7 +192,7 @@ namespace omtcapture
                         _consecutiveReadFailures++;
                         if (ShouldAttemptRestart())
                         {
-                            if (TryRestartInputs(outputChannels, samplesPerChannel, ref effectiveRate, ref outputByteCount, ref outputShortByteCount, ref audioFrame))
+                            if (TryRestartInputs(outputChannels, samplesPerChannel, ref effectiveRate, ref outputByteCount, ref outputShortByteCount))
                             {
                                 _consecutiveReadFailures = 0;
                                 continue;
@@ -322,7 +322,7 @@ namespace omtcapture
             return (DateTime.UtcNow - _lastRestartAttempt).TotalMilliseconds >= cooldownMs;
         }
 
-        private bool TryRestartInputs(int outputChannels, int samplesPerChannel, ref int effectiveRate, ref int outputByteCount, ref int outputShortByteCount, ref OMTMediaFrame audioFrame)
+        private bool TryRestartInputs(int outputChannels, int samplesPerChannel, ref int effectiveRate, ref int outputByteCount, ref int outputShortByteCount)
         {
             _lastRestartAttempt = DateTime.UtcNow;
             Console.WriteLine("Audio pipeline: no input data; attempting restart.");
@@ -346,9 +346,6 @@ namespace omtcapture
             outputShortByteCount = outputSampleCount * sizeof(short);
 
             InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
-            audioFrame.SampleRate = effectiveRate;
-            audioFrame.Data = _planarHandle.AddrOfPinnedObject();
-            audioFrame.DataLength = outputByteCount;
 
             Console.WriteLine($"Audio pipeline: restart success. Rate: {effectiveRate}, HDMI In: {_hdmiChannels}ch, TRS In: {_trsChannels}ch");
             return true;
