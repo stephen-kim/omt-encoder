@@ -277,6 +277,11 @@ namespace omtcapture
 
                     int networkSend;
                     bool sent = false;
+                    if (AudioPipeline.IsAudioSending)
+                    {
+                        continue;
+                    }
+
                     if (Monitor.TryEnter(_sendLock))
                     {
                         try

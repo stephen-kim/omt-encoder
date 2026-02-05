@@ -43,6 +43,8 @@ namespace omtcapture
         private bool _hasLastMix;
         private long _audioPtsBase;
         private long _audioSamplesSent;
+        private static int _audioSending;
+        internal static bool IsAudioSending => Interlocked.CompareExchange(ref _audioSending, 0, 0) == 1;
         // Audio queue disabled (direct send) to avoid added latency/instability.
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
@@ -1008,10 +1010,19 @@ namespace omtcapture
                     Timestamp = timestamp
                 };
 
+                long waitStart = Stopwatch.GetTimestamp();
+                Interlocked.Exchange(ref _audioSending, 1);
                 lock (_sendLock)
                 {
+                    long waitedTicks = Stopwatch.GetTimestamp() - waitStart;
+                    if (waitedTicks > Stopwatch.Frequency / 200) // >5ms
+                    {
+                        double waitedMs = waitedTicks * 1000.0 / Stopwatch.Frequency;
+                        Console.WriteLine($"Audio send waited {waitedMs:F2}ms for send lock.");
+                    }
                     _send.Send(audioFrame);
                 }
+                Interlocked.Exchange(ref _audioSending, 0);
             }
             finally
             {
