@@ -49,12 +49,13 @@ namespace V4L2
             v4l2_format fmt = new v4l2_format();
             fmt.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
 
+            int hrFmt;
             if (useNativeFormat)
             {
-                int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_G_FMT, ref fmt);
-                if (hr != 0)
+                hrFmt = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_G_FMT, ref fmt);
+                if (hrFmt != 0)
                 {
-                    throw new Exception("Unable to get video device format: " + hr);
+                    throw new Exception("Unable to get video device format: " + hrFmt);
                 }
             }
             else
@@ -66,10 +67,10 @@ namespace V4L2
                 fmt.pix.field = V4L2Unmanaged.FIELD_FORMAT_NONE;
                 fmt.pix.sizeimage = fmt.pix.bytesperline * fmt.pix.height;
 
-                int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_FMT, ref fmt);
-                if (hr != 0)
+                hrFmt = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_FMT, ref fmt);
+                if (hrFmt != 0)
                 {
-                    throw new Exception("Unable to set video device format: " + hr);
+                    throw new Exception("Unable to set video device format: " + hrFmt);
                 }
             }
 
