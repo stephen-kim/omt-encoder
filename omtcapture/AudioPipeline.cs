@@ -104,6 +104,17 @@ namespace omtcapture
                 bool useHdmi = mode == "hdmi" || mode == "both";
                 bool useTrs = mode == "trs" || mode == "both";
 
+                if (useHdmi && string.IsNullOrWhiteSpace(_settings.HdmiDevice))
+                {
+                    Console.WriteLine("Audio pipeline: HDMI device not set; disabling HDMI input.");
+                    useHdmi = false;
+                }
+                if (useTrs && string.IsNullOrWhiteSpace(_settings.TrsDevice))
+                {
+                    Console.WriteLine("Audio pipeline: TRS device not set; disabling TRS input.");
+                    useTrs = false;
+                }
+
                 if (!TryStartInputs(useHdmi, useTrs, _settings.SampleRate, Math.Max(1, _settings.Channels), out int effectiveRate))
                 {
                     Console.WriteLine("Audio pipeline error: No input devices could be started.");
