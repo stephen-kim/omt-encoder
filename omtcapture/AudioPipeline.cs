@@ -47,6 +47,8 @@ namespace omtcapture
         private int _readFailuresTrs;
         private DateTime _lastRestartAttempt = DateTime.MinValue;
         private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
+        private bool _expectHdmi;
+        private bool _expectTrs;
 
 
         public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
@@ -115,6 +117,8 @@ namespace omtcapture
                     useTrs = false;
                 }
 
+                _expectHdmi = useHdmi;
+                _expectTrs = useTrs;
                 if (!TryStartInputs(useHdmi, useTrs, _settings.SampleRate, Math.Max(1, _settings.Channels), out int effectiveRate))
                 {
                     Console.WriteLine("Audio pipeline error: No input devices could be started.");
@@ -156,23 +160,23 @@ namespace omtcapture
 
                 while (_running && !_cts.IsCancellationRequested)
                 {
-                    bool read1 = TryReadAudio(_hdmiStream, _readBuffer1, _shortBuffer1, _tempBuffer1, _hdmiFormat);
-                    bool read2 = TryReadAudio(_trsStream, _readBuffer2, _shortBuffer2, _tempBuffer2, _trsFormat);
+                    bool read1 = _expectHdmi && TryReadAudio(_hdmiStream, _readBuffer1, _shortBuffer1, _tempBuffer1, _hdmiFormat);
+                    bool read2 = _expectTrs && TryReadAudio(_trsStream, _readBuffer2, _shortBuffer2, _tempBuffer2, _trsFormat);
 
-                    if (!read1)
+                    if (_expectHdmi && !read1)
                     {
                         _readFailuresHdmi++;
                     }
-                    if (!read2)
+                    if (_expectTrs && !read2)
                     {
                         _readFailuresTrs++;
                     }
-                    if (!read1 || !read2)
+                    if ((_expectHdmi && !read1) || (_expectTrs && !read2))
                     {
                         _readFailuresTotal++;
                     }
 
-                    if (!read1 && !read2)
+                    if ((_expectHdmi && !read1) && (_expectTrs && !read2))
                     {
                         _consecutiveReadFailures++;
                         if (ShouldAttemptRestart())
@@ -742,6 +746,7 @@ namespace omtcapture
                 }
                 else
                 {
+                    _hdmiChannels = 0;
                     hdmiOk = true;
                 }
 
@@ -760,6 +765,7 @@ namespace omtcapture
                 }
                 else
                 {
+                    _trsChannels = 0;
                     trsOk = true;
                 }
 
@@ -778,7 +784,7 @@ namespace omtcapture
             // OR stick to the existing robust fallback flow but decoupled)
             
             // Let's implement the fallback if one fails
-             if (useHdmi && useTrs)
+            if (useHdmi && useTrs)
             {
                  foreach (int rate in rateCandidates)
                  {
@@ -786,27 +792,29 @@ namespace omtcapture
                      // Try HDMI only
                      foreach (int ch in channelCandidates) {
                          if (StartInput(_settings.HdmiDevice, rate, ch, out _hdmiProcess, out _hdmiFormat)) {
-                             _hdmiChannels = ch;
-                             _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
-                             _trsStream = null;
-                             effectiveRate = rate;
-                             Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
-                             return true;
-                         }
-                     }
+                            _hdmiChannels = ch;
+                            _hdmiStream = _hdmiProcess?.StandardOutput.BaseStream;
+                            _trsStream = null;
+                            _trsChannels = 0;
+                            effectiveRate = rate;
+                            Console.WriteLine("Audio pipeline: TRS input unavailable; using HDMI only.");
+                            return true;
+                        }
+                    }
                      
                      StopProcesses();
                      // Try TRS only
                      foreach (int ch in channelCandidates) {
                          if (StartInput(_settings.TrsDevice, rate, ch, out _trsProcess, out _trsFormat)) {
-                             _trsChannels = ch;
-                             _trsStream = _trsProcess?.StandardOutput.BaseStream;
-                             _hdmiStream = null;
-                             effectiveRate = rate;
-                             Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
-                             return true;
-                         }
-                     }
+                            _trsChannels = ch;
+                            _trsStream = _trsProcess?.StandardOutput.BaseStream;
+                            _hdmiStream = null;
+                            _hdmiChannels = 0;
+                            effectiveRate = rate;
+                            Console.WriteLine("Audio pipeline: HDMI input unavailable; using TRS only.");
+                            return true;
+                        }
+                    }
                  }
             }
 
