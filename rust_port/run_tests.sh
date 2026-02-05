@@ -8,7 +8,7 @@ echo "=== OMT Rust Environment Setup & Test ==="
 # 1. Check for Rust Toolchain
 if ! command -v cargo &> /dev/null; then
     echo "Rust not found. Installing rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
     source "$HOME/.cargo/env"
 else
     echo "Rust toolchain is already installed."
