@@ -41,6 +41,8 @@ namespace omtcapture
         private byte[] _writeBuffer = Array.Empty<byte>();
         private float[] _lastMixBuffer = Array.Empty<float>();
         private bool _hasLastMix;
+        private long _audioPtsBase;
+        private long _audioSamplesSent;
         // Audio queue disabled (direct send) to avoid added latency/instability.
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
@@ -151,6 +153,8 @@ namespace omtcapture
                 InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
                 _lastMixBuffer = new float[outputSampleCount];
                 _hasLastMix = false;
+                _audioPtsBase = GetMonotonicTimestamp100ns();
+                _audioSamplesSent = 0;
 
                 while (_running && !_cts.IsCancellationRequested)
                 {
@@ -178,6 +182,8 @@ namespace omtcapture
                             if (TryRestartInputs(outputChannels, samplesPerChannel, ref effectiveRate, ref outputByteCount, ref outputShortByteCount))
                             {
                                 _consecutiveReadFailures = 0;
+                                _audioPtsBase = GetMonotonicTimestamp100ns();
+                                _audioSamplesSent = 0;
                                 continue;
                             }
                         }
@@ -988,6 +994,8 @@ namespace omtcapture
             GCHandle handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
             try
             {
+                long timestamp = _audioPtsBase + (long)(_audioSamplesSent * 10_000_000.0 / sampleRate);
+                _audioSamplesSent += samplesPerChannel;
                 OMTMediaFrame audioFrame = new OMTMediaFrame
                 {
                     Type = OMTFrameType.Audio,
@@ -997,7 +1005,7 @@ namespace omtcapture
                     SamplesPerChannel = samplesPerChannel,
                     Data = handle.AddrOfPinnedObject(),
                     DataLength = payload.Length,
-                    Timestamp = GetMonotonicTimestamp100ns()
+                    Timestamp = timestamp
                 };
 
                 lock (_sendLock)
