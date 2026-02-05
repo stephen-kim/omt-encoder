@@ -856,9 +856,21 @@ namespace omtcapture
             {
                 using Process process = new Process { StartInfo = info };
                 process.Start();
+                if (!process.WaitForExit(500))
+                {
+                    try
+                    {
+                        process.Kill(true);
+                    }
+                    catch
+                    {
+                        // Best effort: if the probe hangs, skip hw params.
+                    }
+                    return null;
+                }
+
                 string output = process.StandardOutput.ReadToEnd();
                 string error = process.StandardError.ReadToEnd();
-                process.WaitForExit(1000);
 
                 string combined = string.IsNullOrWhiteSpace(output) ? error : output;
                 if (string.IsNullOrWhiteSpace(combined))
