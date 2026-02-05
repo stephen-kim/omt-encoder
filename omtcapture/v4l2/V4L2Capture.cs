@@ -97,7 +97,7 @@ namespace V4L2
             rb.count = 2;
             rb.memory = V4L2Unmanaged.V4L2_MEMORY_MMAP;
 
-            hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_REQBUFS, ref rb);
+            int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_REQBUFS, ref rb);
 
             if (hr != 0)
             {
