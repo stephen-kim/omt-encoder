@@ -42,6 +42,7 @@ namespace omtcapture
         private DateTime _lastLogTime = DateTime.MinValue;
         private int _consecutiveReadFailures;
         private DateTime _lastRestartAttempt = DateTime.MinValue;
+        private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
 
 
         public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
@@ -135,7 +136,7 @@ namespace omtcapture
                     SamplesPerChannel = samplesPerChannel,
                     Data = _planarHandle.AddrOfPinnedObject(),
                     DataLength = outputByteCount,
-                    Timestamp = -1
+                    Timestamp = 0
                 };
 
                 while (_running && !_cts.IsCancellationRequested)
@@ -158,6 +159,7 @@ namespace omtcapture
                         // Send silence to avoid audio gaps on the receiver.
                         Array.Clear(_mixBuffer, 0, _mixBuffer.Length);
                         ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
+                        audioFrame.Timestamp = GetMonotonicTimestamp100ns();
                         lock (_sendLock)
                         {
                             _send.Send(audioFrame);
@@ -209,6 +211,7 @@ namespace omtcapture
 
                     ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
 
+                    audioFrame.Timestamp = GetMonotonicTimestamp100ns();
                     lock (_sendLock)
                     {
                         _send.Send(audioFrame);
@@ -934,6 +937,11 @@ namespace omtcapture
             _readBuffer1 = Array.Empty<byte>();
             _readBuffer2 = Array.Empty<byte>();
             _writeBuffer = Array.Empty<byte>();
+        }
+
+        private static long GetMonotonicTimestamp100ns()
+        {
+            return (long)(Stopwatch.GetTimestamp() * TimestampTo100Ns);
         }
 
         private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)

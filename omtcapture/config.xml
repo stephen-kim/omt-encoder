@@ -16,10 +16,10 @@
     <trsDevice>hw:2,0</trsDevice>
     <sampleRate>48000</sampleRate>
     <channels>2</channels>
-    <samplesPerChannel>960</samplesPerChannel>
+    <samplesPerChannel>240</samplesPerChannel>
     <mixGain>4.0</mixGain>
-    <arecordBufferUsec>800000</arecordBufferUsec>
-    <arecordPeriodUsec>200000</arecordPeriodUsec>
+    <arecordBufferUsec>200000</arecordBufferUsec>
+    <arecordPeriodUsec>50000</arecordPeriodUsec>
     <restartAfterFailedReads>5</restartAfterFailedReads>
     <restartCooldownMs>1000</restartCooldownMs>
     <monitor>

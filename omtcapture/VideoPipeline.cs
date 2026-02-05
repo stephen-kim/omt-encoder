@@ -20,6 +20,7 @@ namespace omtcapture
         private readonly object _previewLock = new();
         private volatile bool _restartRequested;
         private volatile bool _previewRestartRequested;
+        private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
 
         public VideoPipeline(OMTSend send, object sendLock, VideoSettings settings)
         {
@@ -255,7 +256,7 @@ namespace omtcapture
 
                     frame.Data = captureFrame.Data;
                     frame.DataLength = captureFrame.Length;
-                    frame.Timestamp = captureFrame.Timestamp;
+                    frame.Timestamp = GetMonotonicTimestamp100ns();
 
                     if (transformProcess != null && transformInput != null && transformOutput != null)
                     {
@@ -270,7 +271,7 @@ namespace omtcapture
 
                         frame.Data = transformOutputHandle.AddrOfPinnedObject();
                         frame.DataLength = transformOutputBuffer.Length;
-                        frame.Timestamp = DateTime.UtcNow.Ticks;
+                        frame.Timestamp = GetMonotonicTimestamp100ns();
                     }
 
                     int networkSend;
@@ -411,6 +412,11 @@ namespace omtcapture
                 (int)OMTCodec.NV12 => (width * height * 3) / 2,
                 _ => width * height * 2
             };
+        }
+
+        private static long GetMonotonicTimestamp100ns()
+        {
+            return (long)(Stopwatch.GetTimestamp() * TimestampTo100Ns);
         }
 
         private static string GetPixelFormat(int codec)
