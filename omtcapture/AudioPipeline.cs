@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Collections.Concurrent;
 using libomtnet;
 
 namespace omtcapture
@@ -40,6 +41,12 @@ namespace omtcapture
         private byte[] _writeBuffer = Array.Empty<byte>();
         private float[] _lastMixBuffer = Array.Empty<float>();
         private bool _hasLastMix;
+        private readonly ConcurrentQueue<AudioChunk> _audioQueue = new();
+        private readonly AutoResetEvent _audioQueueSignal = new(false);
+        private Thread? _sendThread;
+        private volatile bool _sendRunning;
+        private int _audioQueueCount;
+        private const int MaxAudioQueue = 8;
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
         private DateTime _lastReadLogTime = DateTime.MinValue;
@@ -74,6 +81,14 @@ namespace omtcapture
             }
 
             _running = true;
+            _sendRunning = true;
+            _sendThread = new Thread(SendLoop)
+            {
+                IsBackground = true,
+                Name = "AudioSend",
+                Priority = ThreadPriority.AboveNormal
+            };
+            _sendThread.Start();
             _thread = new Thread(Run)
             {
                 IsBackground = true,
@@ -89,6 +104,10 @@ namespace omtcapture
             _cts.Cancel();
             _thread?.Join(TimeSpan.FromSeconds(2));
             _thread = null;
+            _sendRunning = false;
+            _audioQueueSignal.Set();
+            _sendThread?.Join(TimeSpan.FromSeconds(2));
+            _sendThread = null;
             StopProcesses();
             ReleaseBuffers();
         }
@@ -150,18 +169,6 @@ namespace omtcapture
                 _lastMixBuffer = new float[outputSampleCount];
                 _hasLastMix = false;
 
-                OMTMediaFrame audioFrame = new OMTMediaFrame
-                {
-                    Type = OMTFrameType.Audio,
-                    Codec = (int)OMTCodec.FPA1,
-                    SampleRate = effectiveRate,
-                    Channels = outputChannels,
-                    SamplesPerChannel = samplesPerChannel,
-                    Data = _planarHandle.AddrOfPinnedObject(),
-                    DataLength = outputByteCount,
-                    Timestamp = 0
-                };
-
                 while (_running && !_cts.IsCancellationRequested)
                 {
                     bool read1 = _expectHdmi && TryReadAudio(_hdmiStream, _readBuffer1, _shortBuffer1, _tempBuffer1, _hdmiFormat);
@@ -202,11 +209,7 @@ namespace omtcapture
                             Array.Clear(_mixBuffer, 0, _mixBuffer.Length);
                         }
                         ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
-                        audioFrame.Timestamp = GetMonotonicTimestamp100ns();
-                        lock (_sendLock)
-                        {
-                            _send.Send(audioFrame);
-                        }
+                        EnqueueAudioChunk(outputByteCount, effectiveRate, outputChannels, samplesPerChannel);
                         Thread.Sleep(5);
                         continue;
                     }
@@ -264,12 +267,7 @@ namespace omtcapture
                     }
 
                     ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
-
-                    audioFrame.Timestamp = GetMonotonicTimestamp100ns();
-                    lock (_sendLock)
-                    {
-                        _send.Send(audioFrame);
-                    }
+                    EnqueueAudioChunk(outputByteCount, effectiveRate, outputChannels, samplesPerChannel);
                 }
             }
             catch (Exception ex)
@@ -1000,6 +998,75 @@ namespace omtcapture
         private static long GetMonotonicTimestamp100ns()
         {
             return (long)(Stopwatch.GetTimestamp() * TimestampTo100Ns);
+        }
+
+        private void EnqueueAudioChunk(int byteCount, int sampleRate, int channels, int samplesPerChannel)
+        {
+            byte[] payload = new byte[byteCount];
+            Buffer.BlockCopy(_planarBuffer, 0, payload, 0, byteCount);
+
+            AudioChunk chunk = new AudioChunk
+            {
+                Data = payload,
+                SampleRate = sampleRate,
+                Channels = channels,
+                SamplesPerChannel = samplesPerChannel,
+                Timestamp = GetMonotonicTimestamp100ns()
+            };
+
+            _audioQueue.Enqueue(chunk);
+            int count = Interlocked.Increment(ref _audioQueueCount);
+            while (count > MaxAudioQueue && _audioQueue.TryDequeue(out _))
+            {
+                count = Interlocked.Decrement(ref _audioQueueCount);
+            }
+
+            _audioQueueSignal.Set();
+        }
+
+        private void SendLoop()
+        {
+            while (_sendRunning)
+            {
+                _audioQueueSignal.WaitOne(10);
+                while (_audioQueue.TryDequeue(out AudioChunk? chunk))
+                {
+                    Interlocked.Decrement(ref _audioQueueCount);
+                    GCHandle handle = GCHandle.Alloc(chunk.Data, GCHandleType.Pinned);
+                    try
+                    {
+                        OMTMediaFrame audioFrame = new OMTMediaFrame
+                        {
+                            Type = OMTFrameType.Audio,
+                            Codec = (int)OMTCodec.FPA1,
+                            SampleRate = chunk.SampleRate,
+                            Channels = chunk.Channels,
+                            SamplesPerChannel = chunk.SamplesPerChannel,
+                            Data = handle.AddrOfPinnedObject(),
+                            DataLength = chunk.Data.Length,
+                            Timestamp = chunk.Timestamp
+                        };
+
+                        lock (_sendLock)
+                        {
+                            _send.Send(audioFrame);
+                        }
+                    }
+                    finally
+                    {
+                        handle.Free();
+                    }
+                }
+            }
+        }
+
+        private sealed class AudioChunk
+        {
+            public byte[] Data { get; set; } = Array.Empty<byte>();
+            public int SampleRate { get; set; }
+            public int Channels { get; set; }
+            public int SamplesPerChannel { get; set; }
+            public long Timestamp { get; set; }
         }
 
         private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)
