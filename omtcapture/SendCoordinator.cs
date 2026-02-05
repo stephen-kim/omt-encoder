@@ -48,7 +48,7 @@ namespace omtcapture
         private int _videoSendZero;
         private DateTime _lastLog = DateTime.MinValue;
 
-        public SendCoordinator(OMTSend send, int audioQueueCapacity = 6, int videoQueueCapacity = 1)
+        public SendCoordinator(OMTSend send, int audioQueueCapacity = 8, int videoQueueCapacity = 1)
         {
             _send = send;
             _audioQueue = new BlockingCollection<SendItem>(audioQueueCapacity);
