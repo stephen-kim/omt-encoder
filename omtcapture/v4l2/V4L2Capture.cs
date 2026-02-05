@@ -35,8 +35,10 @@ namespace V4L2
         private IntPtr[] bufferData;
         private v4l2_buffer lastBuffer;
         private bool running = false;
+        private bool formatChanged;
+        private int frameCounter;
 
-        public V4L2Capture(string deviceName, CaptureFormat format) : base(deviceName, format)
+        public V4L2Capture(string deviceName, CaptureFormat format, bool useNativeFormat) : base(deviceName, format)
         {
             devHandle = V4L2Unmanaged.open(deviceName, FileOpenFlags.O_RDWR | FileOpenFlags.O_NONBLOCK);
             if (devHandle == -1)
@@ -46,17 +48,29 @@ namespace V4L2
 
             v4l2_format fmt = new v4l2_format();
             fmt.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
-            fmt.pix.width = (uint)format.Width;
-            fmt.pix.height = (uint)format.Height;
-            fmt.pix.pixelformat = (uint)format.Codec;
-            fmt.pix.bytesperline = (uint)format.Stride;
-            fmt.pix.field = V4L2Unmanaged.FIELD_FORMAT_NONE;
-            fmt.pix.sizeimage = fmt.pix.bytesperline * fmt.pix.height;
 
-            int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_FMT, ref fmt);
-            if (hr != 0)
+            if (useNativeFormat)
             {
-                throw new Exception("Unable to set video device format: " + hr);
+                int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_G_FMT, ref fmt);
+                if (hr != 0)
+                {
+                    throw new Exception("Unable to get video device format: " + hr);
+                }
+            }
+            else
+            {
+                fmt.pix.width = (uint)format.Width;
+                fmt.pix.height = (uint)format.Height;
+                fmt.pix.pixelformat = (uint)format.Codec;
+                fmt.pix.bytesperline = (uint)format.Stride;
+                fmt.pix.field = V4L2Unmanaged.FIELD_FORMAT_NONE;
+                fmt.pix.sizeimage = fmt.pix.bytesperline * fmt.pix.height;
+
+                int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_FMT, ref fmt);
+                if (hr != 0)
+                {
+                    throw new Exception("Unable to set video device format: " + hr);
+                }
             }
 
             v4l2_streamparm parm = new v4l2_streamparm();
@@ -65,10 +79,10 @@ namespace V4L2
             parm.capture.timeperframe.numerator = (uint)format.FrameRateD;
             parm.capture.timeperframe.denominator = (uint)format.FrameRateN; //Flip them as it expects time per frame (1/60) vs frame rate (60/1)
 
-            hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_PARM, ref parm);
-            if (hr != 0)
+            int hrParm = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_S_PARM, ref parm);
+            if (hrParm != 0 && !useNativeFormat)
             {
-                throw new Exception("Unable to set video device frame rate: " + hr + "," + V4L2Unmanaged.VIDIOC_S_PARM);
+                throw new Exception("Unable to set video device frame rate: " + hrParm + "," + V4L2Unmanaged.VIDIOC_S_PARM);
             }
 
             this.format.Width = (int)fmt.pix.width;
@@ -211,6 +225,16 @@ namespace V4L2
 
             lastBuffer = readbuf;
 
+            frameCounter++;
+            if (frameCounter % 60 == 0)
+            {
+                CheckFormatChange();
+                if (formatChanged)
+                {
+                    return false;
+                }
+            }
+
             Int64 timestamp = (Int64)readbuf.timestamp.tv_sec * 10000000;
             timestamp += (Int64)readbuf.timestamp.tv_usec * 10;
 
@@ -218,6 +242,26 @@ namespace V4L2
             frame.Length = (int)readbuf.length;
             frame.Data =  bufferData[readbuf.index];
             return true;
+        }
+
+        public override bool FormatChanged => formatChanged;
+
+        private void CheckFormatChange()
+        {
+            v4l2_format current = new v4l2_format();
+            current.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
+            int hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_G_FMT, ref current);
+            if (hr != 0)
+            {
+                return;
+            }
+
+            if ((int)current.pix.width != format.Width ||
+                (int)current.pix.height != format.Height ||
+                (int)current.pix.pixelformat != format.Codec)
+            {
+                formatChanged = true;
+            }
         }
 
         protected override void DisposeInternal()

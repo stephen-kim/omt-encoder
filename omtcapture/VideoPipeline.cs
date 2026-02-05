@@ -153,7 +153,7 @@ namespace omtcapture
             long fpsWindowStart = Stopwatch.GetTimestamp();
             int fpsWindowFrames = 0;
 
-            using CaptureDevice capture = new V4L2Capture(settings.DevicePath, fmt);
+            using CaptureDevice capture = new V4L2Capture(settings.DevicePath, fmt, settings.UseNativeFormat);
 
             fmt = capture.Format;
             if (fmt.Codec == (int)V4L2Unmanaged.PIXEL_FORMAT_YUYV)
@@ -339,6 +339,11 @@ namespace omtcapture
                 }
                 else
                 {
+                    if (capture.FormatChanged)
+                    {
+                        Console.WriteLine("Video format changed; restarting capture.");
+                        break;
+                    }
                     Thread.Sleep(1);
                 }
             }

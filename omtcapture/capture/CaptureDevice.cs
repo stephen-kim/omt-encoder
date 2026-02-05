@@ -37,6 +37,7 @@ namespace omtcapture.capture
         }
 
         public CaptureFormat Format {  get { return format; } }
+        public virtual bool FormatChanged => false;
 
         public virtual void StartCapture()
         {

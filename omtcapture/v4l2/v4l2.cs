@@ -171,6 +171,7 @@ namespace V4L2
         public const uint V4L2_MEMORY_MMAP = 1;
 
         public static uint VIDIOC_S_FMT = _IOC(_IOC_READ | _IOC_WRITE, 'V', 5, 208);
+        public static uint VIDIOC_G_FMT = _IOC(_IOC_READ | _IOC_WRITE, 'V', 4, 208);
         public static uint VIDIOC_REQBUFS = _IOC(_IOC_READ | _IOC_WRITE, 'V', 8, 20);
         public static uint VIDIOC_QUERYBUF = _IOC(_IOC_READ | _IOC_WRITE, 'V', 9, 88);
         public static uint VIDIOC_QBUF = _IOC(_IOC_READ | _IOC_WRITE, 'V', 15, 88);
@@ -200,4 +201,3 @@ namespace V4L2
     }
 
 }
-

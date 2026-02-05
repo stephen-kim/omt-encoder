@@ -43,6 +43,8 @@ namespace omtcapture
         private bool _hasLastMix;
         private long _audioPtsBase;
         private long _audioSamplesSent;
+        private int _audioSendZero;
+        private DateTime _lastSendLogTime = DateTime.MinValue;
         // Audio queue disabled (direct send) to avoid added latency/instability.
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
@@ -1008,14 +1010,29 @@ namespace omtcapture
                     Timestamp = timestamp
                 };
 
+                int sentBytes;
                 lock (_sendLock)
                 {
-                    _send.Send(audioFrame);
+                    sentBytes = _send.Send(audioFrame);
+                }
+                if (sentBytes == 0)
+                {
+                    _audioSendZero++;
                 }
             }
             finally
             {
                 handle.Free();
+            }
+
+            if ((DateTime.Now - _lastSendLogTime).TotalSeconds >= 5)
+            {
+                if (_audioSendZero > 0)
+                {
+                    Console.WriteLine($"Audio send returned 0 bytes { _audioSendZero } times in last 5s.");
+                }
+                _audioSendZero = 0;
+                _lastSendLogTime = DateTime.Now;
             }
         }
 
