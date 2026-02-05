@@ -40,7 +40,11 @@ namespace omtcapture
         private byte[] _writeBuffer = Array.Empty<byte>();
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
+        private DateTime _lastReadLogTime = DateTime.MinValue;
         private int _consecutiveReadFailures;
+        private int _readFailuresTotal;
+        private int _readFailuresHdmi;
+        private int _readFailuresTrs;
         private DateTime _lastRestartAttempt = DateTime.MinValue;
         private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
 
@@ -144,6 +148,19 @@ namespace omtcapture
                     bool read1 = TryReadAudio(_hdmiStream, _readBuffer1, _shortBuffer1, _tempBuffer1, _hdmiFormat);
                     bool read2 = TryReadAudio(_trsStream, _readBuffer2, _shortBuffer2, _tempBuffer2, _trsFormat);
 
+                    if (!read1)
+                    {
+                        _readFailuresHdmi++;
+                    }
+                    if (!read2)
+                    {
+                        _readFailuresTrs++;
+                    }
+                    if (!read1 || !read2)
+                    {
+                        _readFailuresTotal++;
+                    }
+
                     if (!read1 && !read2)
                     {
                         _consecutiveReadFailures++;
@@ -175,6 +192,15 @@ namespace omtcapture
                     {
                         LogAudioLevelsNew(read1, read2, samplesPerChannel);
                         _lastLogTime = DateTime.Now;
+                    }
+
+                    if ((DateTime.Now - _lastReadLogTime).TotalSeconds >= 5)
+                    {
+                        Console.WriteLine($"Audio read failures (last 5s): total={_readFailuresTotal}, hdmi={_readFailuresHdmi}, trs={_readFailuresTrs}");
+                        _readFailuresTotal = 0;
+                        _readFailuresHdmi = 0;
+                        _readFailuresTrs = 0;
+                        _lastReadLogTime = DateTime.Now;
                     }
 
                     // Monitor logic uses outputSampleCount (stereo)
