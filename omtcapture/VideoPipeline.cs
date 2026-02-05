@@ -10,8 +10,7 @@ namespace omtcapture
 {
     internal sealed class VideoPipeline : IDisposable
     {
-        private readonly OMTSend _send;
-        private readonly object _sendLock;
+        private readonly ISendQueue _sendQueue;
         private readonly object _settingsLock = new();
         private CancellationTokenSource? _cts;
         private Thread? _thread;
@@ -23,10 +22,9 @@ namespace omtcapture
         private volatile bool _previewRestartRequested;
         private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
 
-        public VideoPipeline(OMTSend send, object sendLock, VideoSettings settings)
+        public VideoPipeline(ISendQueue sendQueue, VideoSettings settings)
         {
-            _send = send;
-            _sendLock = sendLock;
+            _sendQueue = sendQueue;
             _settings = Clone(settings);
         }
 
@@ -287,26 +285,14 @@ namespace omtcapture
                         frame.Timestamp = GetMonotonicTimestamp100ns();
                     }
 
-                    int networkSend;
-                    bool sent = false;
-                    if (Monitor.TryEnter(_sendLock))
+                    int networkSend = 0;
+                    byte[] payload = new byte[frame.DataLength];
+                    Marshal.Copy(frame.Data, payload, 0, frame.DataLength);
+                    if (_sendQueue.EnqueueVideo(payload, frame, frame.Timestamp))
                     {
-                        try
-                        {
-                            networkSend = _send.Send(frame);
-                            sent = true;
-                        }
-                        finally
-                        {
-                            Monitor.Exit(_sendLock);
-                        }
+                        networkSend = payload.Length;
                     }
                     else
-                    {
-                        networkSend = 0;
-                    }
-
-                    if (!sent)
                     {
                         Thread.Sleep(1);
                         continue;

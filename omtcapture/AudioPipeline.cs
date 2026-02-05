@@ -3,15 +3,12 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Linq;
-using System.Collections.Concurrent;
-using libomtnet;
 
 namespace omtcapture
 {
     internal sealed class AudioPipeline : IDisposable
     {
-        private readonly object _sendLock;
-        private readonly OMTSend _send;
+        private readonly ISendQueue _sendQueue;
         private readonly AudioSettings _settings;
         private readonly CancellationTokenSource _cts = new();
         private Thread? _thread;
@@ -41,11 +38,7 @@ namespace omtcapture
         private byte[] _writeBuffer = Array.Empty<byte>();
         private float[] _lastMixBuffer = Array.Empty<float>();
         private bool _hasLastMix;
-        private long _audioPtsBase;
-        private long _audioSamplesSent;
-        private int _audioSendZero;
-        private DateTime _lastSendLogTime = DateTime.MinValue;
-        // Audio queue disabled (direct send) to avoid added latency/instability.
+        // Audio queue handled by SendCoordinator.
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
         private DateTime _lastReadLogTime = DateTime.MinValue;
@@ -59,10 +52,9 @@ namespace omtcapture
         private bool _expectTrs;
 
 
-        public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
+        public AudioPipeline(ISendQueue sendQueue, AudioSettings settings)
         {
-            _send = send;
-            _sendLock = sendLock;
+            _sendQueue = sendQueue;
             _settings = settings;
         }
 
@@ -157,8 +149,6 @@ namespace omtcapture
                 InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
                 _lastMixBuffer = new float[outputSampleCount];
                 _hasLastMix = false;
-                _audioPtsBase = GetMonotonicTimestamp100ns();
-                _audioSamplesSent = 0;
 
                 while (_running && !_cts.IsCancellationRequested)
                 {
@@ -186,8 +176,6 @@ namespace omtcapture
                             if (TryRestartInputs(outputChannels, samplesPerChannel, ref effectiveRate, ref outputByteCount, ref outputShortByteCount))
                             {
                                 _consecutiveReadFailures = 0;
-                                _audioPtsBase = GetMonotonicTimestamp100ns();
-                                _audioSamplesSent = 0;
                                 continue;
                             }
                         }
@@ -1006,59 +994,8 @@ namespace omtcapture
         {
             byte[] payload = new byte[byteCount];
             Buffer.BlockCopy(_planarBuffer, 0, payload, 0, byteCount);
-
-            long timestamp = _audioPtsBase + (long)(_audioSamplesSent * 10_000_000.0 / sampleRate);
-            _audioSamplesSent += samplesPerChannel;
-            GCHandle handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
-            try
-            {
-                OMTMediaFrame audioFrame = new OMTMediaFrame
-                {
-                    Type = OMTFrameType.Audio,
-                    Codec = (int)OMTCodec.FPA1,
-                    SampleRate = sampleRate,
-                    Channels = channels,
-                    SamplesPerChannel = samplesPerChannel,
-                    Data = handle.AddrOfPinnedObject(),
-                    DataLength = payload.Length,
-                    Timestamp = timestamp
-                };
-
-                int sentBytes = 0;
-                for (int attempt = 0; attempt < 2; attempt++)
-                {
-                    lock (_sendLock)
-                    {
-                        sentBytes = _send.Send(audioFrame);
-                    }
-                    if (sentBytes > 0)
-                    {
-                        break;
-                    }
-                    if (attempt == 0)
-                    {
-                        Thread.Sleep(1);
-                    }
-                }
-                if (sentBytes == 0)
-                {
-                    _audioSendZero++;
-                }
-            }
-            finally
-            {
-                handle.Free();
-            }
-
-            if ((DateTime.Now - _lastSendLogTime).TotalSeconds >= 5)
-            {
-                if (_audioSendZero > 0)
-                {
-                    Console.WriteLine($"Audio send returned 0 bytes { _audioSendZero } times in last 5s.");
-                }
-                _audioSendZero = 0;
-                _lastSendLogTime = DateTime.Now;
-            }
+            long timestamp = GetMonotonicTimestamp100ns();
+            _sendQueue.EnqueueAudio(payload, sampleRate, channels, samplesPerChannel, timestamp);
         }
 
         private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)

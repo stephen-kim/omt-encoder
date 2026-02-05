@@ -31,7 +31,6 @@ namespace omtcapture
     {
 
         static bool running = true;
-        static readonly object SendLock = new();
         static readonly object SettingsLock = new();
         static void Main(string[] args)
         {
@@ -55,11 +54,12 @@ namespace omtcapture
                 WebServer? webServer = null;
 
                 using (OMTSend send = new OMTSend(settings.Video.Name, OMTQuality.Default))
+                using (ISendQueue sendQueue = new SendCoordinator(send))
                 {
-                    audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
+                    audioPipeline = new AudioPipeline(sendQueue, settings.Audio);
                     audioPipeline.Start();
 
-                    videoPipeline = new VideoPipeline(send, SendLock, settings.Video);
+                    videoPipeline = new VideoPipeline(sendQueue, settings.Video);
                     videoPipeline.UpdatePreview(settings.Preview);
                     videoPipeline.Start();
 
@@ -68,7 +68,7 @@ namespace omtcapture
                         webServer = new WebServer(settings.Web.Port,
                             () => settings,
                             DeviceProbe.GetSnapshot,
-                            update => ApplyUpdate(update, ref settings, configFilename, send, ref audioPipeline, ref videoPipeline));
+                            update => ApplyUpdate(update, ref settings, configFilename, sendQueue, ref audioPipeline, ref videoPipeline));
                         webServer.Start();
                     }
 
@@ -99,7 +99,7 @@ namespace omtcapture
             SettingsUpdate update,
             ref Settings settings,
             string configPath,
-            OMTSend send,
+            ISendQueue sendQueue,
             ref AudioPipeline? audioPipeline,
             ref VideoPipeline? videoPipeline)
         {
@@ -128,7 +128,7 @@ namespace omtcapture
             if (audioChanged)
             {
                 audioPipeline?.Stop();
-                audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
+                audioPipeline = new AudioPipeline(sendQueue, settings.Audio);
                 audioPipeline.Start();
             }
 
