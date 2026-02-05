@@ -18,12 +18,34 @@ fi
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "Checking Linux system dependencies..."
     
+    MISSING_DEPS=""
+    
     # Check for clang (needed for bindgen)
     if ! command -v clang &> /dev/null; then
-        echo "clang not found. Installing..."
-        sudo apt-get update && sudo apt-get install -y clang libasound2-dev libv4l-dev pkg-config
+        MISSING_DEPS="$MISSING_DEPS clang"
+    fi
+
+    # Check for pkg-config
+    if ! command -v pkg-config &> /dev/null; then
+        MISSING_DEPS="$MISSING_DEPS pkg-config"
+    fi
+
+    # Check for alsa headers
+    if ! pkg-config --exists alsa 2>/dev/null; then
+        MISSING_DEPS="$MISSING_DEPS libasound2-dev"
+    fi
+
+    # Check for v4l headers
+    if ! pkg-config --exists libv4l2 2>/dev/null; then
+        MISSING_DEPS="$MISSING_DEPS libv4l-dev"
+    fi
+
+    if [ ! -z "$MISSING_DEPS" ]; then
+        echo "Missing dependencies:$MISSING_DEPS. Installing..."
+        sudo apt-get update
+        sudo apt-get install -y $MISSING_DEPS
     else
-        echo "Environment looks good (clang/alsa/v4l found)."
+        echo "All system dependencies (clang/alsa/v4l/pkg-config) are present."
     fi
 fi
 
