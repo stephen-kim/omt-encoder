@@ -76,7 +76,6 @@ namespace omtcapture
                     {
                         Thread.Sleep(200);
                     }
-                }
 
                     audioPipeline?.Stop();
                     videoPipeline?.Stop();
