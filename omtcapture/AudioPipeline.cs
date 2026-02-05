@@ -10,7 +10,8 @@ namespace omtcapture
 {
     internal sealed class AudioPipeline : IDisposable
     {
-        private readonly SendCoordinator _coordinator;
+        private readonly object _sendLock;
+        private readonly OMTSend _send;
         private readonly AudioSettings _settings;
         private readonly CancellationTokenSource _cts = new();
         private Thread? _thread;
@@ -56,9 +57,10 @@ namespace omtcapture
         private bool _expectTrs;
 
 
-        public AudioPipeline(SendCoordinator coordinator, AudioSettings settings)
+        public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
         {
-            _coordinator = coordinator;
+            _send = send;
+            _sendLock = sendLock;
             _settings = settings;
         }
 
@@ -991,7 +993,30 @@ namespace omtcapture
 
             long timestamp = _audioPtsBase + (long)(_audioSamplesSent * 10_000_000.0 / sampleRate);
             _audioSamplesSent += samplesPerChannel;
-            _coordinator.EnqueueAudio(payload, sampleRate, channels, samplesPerChannel, timestamp);
+            GCHandle handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
+            try
+            {
+                OMTMediaFrame audioFrame = new OMTMediaFrame
+                {
+                    Type = OMTFrameType.Audio,
+                    Codec = (int)OMTCodec.FPA1,
+                    SampleRate = sampleRate,
+                    Channels = channels,
+                    SamplesPerChannel = samplesPerChannel,
+                    Data = handle.AddrOfPinnedObject(),
+                    DataLength = payload.Length,
+                    Timestamp = timestamp
+                };
+
+                lock (_sendLock)
+                {
+                    _send.Send(audioFrame);
+                }
+            }
+            finally
+            {
+                handle.Free();
+            }
         }
 
         private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)

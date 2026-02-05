@@ -501,7 +501,7 @@ details { margin-top: 10px; }
       <label>Frame rate denominator</label>
       <input id=""videoFrameRateD"" type=""number"" />
       <div class=""check-row"">
-        <input id=""videoUseNative"" type=""checkbox"" />
+        <input id=""videoUseNative"" type=""checkbox"" onchange=""toggleNativeInputs()"" />
         <label for=""videoUseNative"">Use native input format (no transform)</label>
       </div>
       <label>Codec</label>
@@ -654,6 +654,9 @@ async function buildFramebufferOptions(framebuffers) {
 
 function applyVideoPreset() {
   const preset = document.getElementById('videoPreset').value;
+  if (document.getElementById('videoUseNative').checked) {
+    return;
+  }
   if (preset === 'hd-native') {
     document.getElementById('videoWidth').value = 1920;
     document.getElementById('videoHeight').value = 1080;
@@ -679,6 +682,24 @@ function applyVideoPreset() {
     document.getElementById('videoFrameRateD').value = 1;
     document.getElementById('videoCodec').value = 'NV12';
   }
+}
+
+function toggleNativeInputs() {
+  const nativeOn = document.getElementById('videoUseNative').checked;
+  const ids = [
+    'videoPreset',
+    'videoWidth',
+    'videoHeight',
+    'videoFrameRateN',
+    'videoFrameRateD',
+    'videoCodec'
+  ];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.disabled = nativeOn;
+    }
+  });
 }
 
 function detectVideoPreset(width, height) {
@@ -772,6 +793,7 @@ async function loadConfig() {
   document.getElementById('videoUseNative').checked = data.video.useNativeFormat;
   document.getElementById('videoCodec').value = data.video.codec;
   document.getElementById('videoPreset').value = detectVideoPreset(data.video.width, data.video.height);
+  toggleNativeInputs();
 
   document.getElementById('audioSampleRate').value = data.audio.sampleRate;
   document.getElementById('audioChannels').value = data.audio.channels;

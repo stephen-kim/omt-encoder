@@ -31,6 +31,7 @@ namespace omtcapture
     {
 
         static bool running = true;
+        static readonly object SendLock = new();
         static readonly object SettingsLock = new();
         static void Main(string[] args)
         {
@@ -54,13 +55,10 @@ namespace omtcapture
 
                 using (OMTSend send = new OMTSend(settings.Video.Name, OMTQuality.Default))
                 {
-                    using SendCoordinator coordinator = new SendCoordinator(send);
-                    coordinator.Start();
-
-                    audioPipeline = new AudioPipeline(coordinator, settings.Audio);
+                    audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
                     audioPipeline.Start();
 
-                    videoPipeline = new VideoPipeline(coordinator, settings.Video);
+                    videoPipeline = new VideoPipeline(send, SendLock, settings.Video);
                     videoPipeline.UpdatePreview(settings.Preview);
                     videoPipeline.Start();
 
@@ -69,7 +67,7 @@ namespace omtcapture
                         webServer = new WebServer(settings.Web.Port,
                             () => settings,
                             DeviceProbe.GetSnapshot,
-                            update => ApplyUpdate(update, ref settings, configFilename, coordinator, ref audioPipeline, ref videoPipeline));
+                            update => ApplyUpdate(update, ref settings, configFilename, send, ref audioPipeline, ref videoPipeline));
                         webServer.Start();
                     }
 
@@ -100,7 +98,7 @@ namespace omtcapture
             SettingsUpdate update,
             ref Settings settings,
             string configPath,
-            SendCoordinator coordinator,
+            OMTSend send,
             ref AudioPipeline? audioPipeline,
             ref VideoPipeline? videoPipeline)
         {
@@ -129,7 +127,7 @@ namespace omtcapture
             if (audioChanged)
             {
                 audioPipeline?.Stop();
-                audioPipeline = new AudioPipeline(coordinator, settings.Audio);
+                audioPipeline = new AudioPipeline(send, SendLock, settings.Audio);
                 audioPipeline.Start();
             }
 
