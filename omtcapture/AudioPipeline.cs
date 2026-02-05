@@ -38,6 +38,8 @@ namespace omtcapture
         private byte[] _readBuffer1 = Array.Empty<byte>();
         private byte[] _readBuffer2 = Array.Empty<byte>();
         private byte[] _writeBuffer = Array.Empty<byte>();
+        private float[] _lastMixBuffer = Array.Empty<float>();
+        private bool _hasLastMix;
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
         private DateTime _lastReadLogTime = DateTime.MinValue;
@@ -145,6 +147,8 @@ namespace omtcapture
                 int outputShortByteCount = outputSampleCount * sizeof(short);
 
                 InitializeBuffers(samplesPerChannel, outputChannels, outputByteCount, outputShortByteCount);
+                _lastMixBuffer = new float[outputSampleCount];
+                _hasLastMix = false;
 
                 OMTMediaFrame audioFrame = new OMTMediaFrame
                 {
@@ -188,8 +192,15 @@ namespace omtcapture
                             }
                         }
 
-                        // Send silence to avoid audio gaps on the receiver.
-                        Array.Clear(_mixBuffer, 0, _mixBuffer.Length);
+                        // Conceal with last good frame; fall back to silence.
+                        if (_hasLastMix)
+                        {
+                            Array.Copy(_lastMixBuffer, _mixBuffer, _mixBuffer.Length);
+                        }
+                        else
+                        {
+                            Array.Clear(_mixBuffer, 0, _mixBuffer.Length);
+                        }
                         ConvertToPlanar(outputChannels, samplesPerChannel, outputSampleCount);
                         audioFrame.Timestamp = GetMonotonicTimestamp100ns();
                         lock (_sendLock)
@@ -202,6 +213,8 @@ namespace omtcapture
 
                     _consecutiveReadFailures = 0;
                     MixBuffersNew(read1, read2, samplesPerChannel);
+                    Array.Copy(_mixBuffer, _lastMixBuffer, _mixBuffer.Length);
+                    _hasLastMix = true;
 
                     if ((DateTime.Now - _lastLogTime).TotalSeconds >= 5)
                     {

@@ -113,10 +113,10 @@ namespace omtcapture
         public string TrsDevice { get; set; } = "hw:2,0";
         public int SampleRate { get; set; } = 48000;
         public int Channels { get; set; } = 2;
-        public int SamplesPerChannel { get; set; } = 240;
+        public int SamplesPerChannel { get; set; } = 360;
         public float MixGain { get; set; } = 0.5f;
-        public int ArecordBufferUsec { get; set; } = 200000;
-        public int ArecordPeriodUsec { get; set; } = 50000;
+        public int ArecordBufferUsec { get; set; } = 400000;
+        public int ArecordPeriodUsec { get; set; } = 100000;
         public int RestartAfterFailedReads { get; set; } = 5;
         public int RestartCooldownMs { get; set; } = 1000;
         public MonitorSettings Monitor { get; set; } = new();

@@ -80,7 +80,7 @@ namespace V4L2
 
             v4l2_requestbuffers rb = new v4l2_requestbuffers();
             rb.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
-            rb.count = 3;
+            rb.count = 2;
             rb.memory = V4L2Unmanaged.V4L2_MEMORY_MMAP;
 
             hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_REQBUFS, ref rb);
