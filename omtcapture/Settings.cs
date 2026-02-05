@@ -56,6 +56,7 @@ namespace omtcapture
         public int FrameRateN { get; set; } = 60000;
         public int FrameRateD { get; set; } = 1001;
         public string Codec { get; set; } = "YUY2";
+        public bool UseNativeFormat { get; set; } = true;
 
         public static VideoSettings Load(XmlNode root)
         {
@@ -67,6 +68,7 @@ namespace omtcapture
             settings.FrameRateN = ReadInt(root, "frameRateN", settings.FrameRateN);
             settings.FrameRateD = ReadInt(root, "frameRateD", settings.FrameRateD);
             settings.Codec = ReadString(root, "codec", settings.Codec);
+            settings.UseNativeFormat = ReadBool(root, "useNativeFormat", settings.UseNativeFormat);
             return settings;
         }
 
@@ -79,6 +81,7 @@ namespace omtcapture
             AppendChild(doc, root, "frameRateN", FrameRateN.ToString());
             AppendChild(doc, root, "frameRateD", FrameRateD.ToString());
             AppendChild(doc, root, "codec", Codec);
+            AppendChild(doc, root, "useNativeFormat", UseNativeFormat ? "true" : "false");
         }
 
         private static string ReadString(XmlNode root, string name, string fallback)
@@ -91,6 +94,17 @@ namespace omtcapture
         {
             XmlNode? node = root.SelectSingleNode(name);
             if (node == null || !int.TryParse(node.InnerText, out int value))
+            {
+                return fallback;
+            }
+
+            return value;
+        }
+
+        private static bool ReadBool(XmlNode root, string name, bool fallback)
+        {
+            XmlNode? node = root.SelectSingleNode(name);
+            if (node == null || !bool.TryParse(node.InnerText, out bool value))
             {
                 return fallback;
             }

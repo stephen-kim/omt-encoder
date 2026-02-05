@@ -9,6 +9,7 @@
   <frameRateD>1</frameRateD>
   <!--Supported Formats: UYVY, YUY2, NV12-->
   <codec>YUY2</codec>
+  <useNativeFormat>true</useNativeFormat>
   <audio>
     <!--none | hdmi | trs | both-->
     <mode>both</mode>

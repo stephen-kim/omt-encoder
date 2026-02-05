@@ -500,6 +500,10 @@ details { margin-top: 10px; }
       <input id=""videoFrameRateN"" type=""number"" />
       <label>Frame rate denominator</label>
       <input id=""videoFrameRateD"" type=""number"" />
+      <div class=""check-row"">
+        <input id=""videoUseNative"" type=""checkbox"" />
+        <label for=""videoUseNative"">Use native input format (no transform)</label>
+      </div>
       <label>Codec</label>
       <select id=""videoCodec"">
         <option value=""UYVY"">UYVY</option>
@@ -765,6 +769,7 @@ async function loadConfig() {
   document.getElementById('videoHeight').value = data.video.height;
   document.getElementById('videoFrameRateN').value = data.video.frameRateN;
   document.getElementById('videoFrameRateD').value = data.video.frameRateD;
+  document.getElementById('videoUseNative').checked = data.video.useNativeFormat;
   document.getElementById('videoCodec').value = data.video.codec;
   document.getElementById('videoPreset').value = detectVideoPreset(data.video.width, data.video.height);
 
@@ -791,6 +796,7 @@ async function saveConfig() {
   payload.video.height = Number(document.getElementById('videoHeight').value);
   payload.video.frameRateN = Number(document.getElementById('videoFrameRateN').value);
   payload.video.frameRateD = Number(document.getElementById('videoFrameRateD').value);
+  payload.video.useNativeFormat = document.getElementById('videoUseNative').checked;
   payload.video.codec = document.getElementById('videoCodec').value;
 
   const selectedInputs = getAudioInputSelection().slice(0, 2);

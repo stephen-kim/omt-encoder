@@ -166,10 +166,21 @@ namespace omtcapture
             int outputFrameRateN = settings.FrameRateN;
             int outputFrameRateD = settings.FrameRateD;
 
-            bool needsTransform = fmt.Width != settings.Width ||
+            bool useNative = settings.UseNativeFormat;
+            bool needsTransform = !useNative && (fmt.Width != settings.Width ||
                 fmt.Height != settings.Height ||
-                fmt.Codec != desiredCodec;
-            bool throttleFps = fmt.FrameRateN * outputFrameRateD > outputFrameRateN * fmt.FrameRateD;
+                fmt.Codec != desiredCodec);
+            bool throttleFps = !useNative && fmt.FrameRateN * outputFrameRateD > outputFrameRateN * fmt.FrameRateD;
+
+            if (useNative)
+            {
+                outputCodec = fmt.Codec;
+                outputWidth = fmt.Width;
+                outputHeight = fmt.Height;
+                outputStride = fmt.Stride;
+                outputFrameRateN = fmt.FrameRateN;
+                outputFrameRateD = fmt.FrameRateD;
+            }
 
             frame.Codec = outputCodec;
             frame.Width = outputWidth;
