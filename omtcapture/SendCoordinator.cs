@@ -16,7 +16,7 @@ namespace omtcapture
         {
             private GCHandle _handle;
             private bool _pinned;
-            public readonly OMTMediaFrame Frame;
+            public OMTMediaFrame Frame;
 
             public SendItem(OMTMediaFrame frame, byte[] payload)
             {
