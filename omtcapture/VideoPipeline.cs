@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using libomtnet;
 using omtcapture.capture;
 using V4L2;
@@ -275,9 +276,27 @@ namespace omtcapture
                     }
 
                     int networkSend;
-                    lock (_sendLock)
+                    bool sent = false;
+                    if (Monitor.TryEnter(_sendLock))
                     {
-                        networkSend = _send.Send(frame);
+                        try
+                        {
+                            networkSend = _send.Send(frame);
+                            sent = true;
+                        }
+                        finally
+                        {
+                            Monitor.Exit(_sendLock);
+                        }
+                    }
+                    else
+                    {
+                        networkSend = 0;
+                    }
+
+                    if (!sent)
+                    {
+                        continue;
                     }
 
                     fpsWindowFrames++;
