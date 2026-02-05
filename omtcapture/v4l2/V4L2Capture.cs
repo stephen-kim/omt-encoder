@@ -23,6 +23,7 @@
 *
 */
 
+using System.Runtime.InteropServices;
 using omtcapture.capture;
 
 namespace V4L2
@@ -37,7 +38,7 @@ namespace V4L2
 
         public V4L2Capture(string deviceName, CaptureFormat format) : base(deviceName, format)
         {
-            devHandle = V4L2Unmanaged.open(deviceName, FileOpenFlags.O_RDWR);
+            devHandle = V4L2Unmanaged.open(deviceName, FileOpenFlags.O_RDWR | FileOpenFlags.O_NONBLOCK);
             if (devHandle == -1)
             {
                 throw new Exception("Unable to open device: " + deviceName);
@@ -79,7 +80,7 @@ namespace V4L2
 
             v4l2_requestbuffers rb = new v4l2_requestbuffers();
             rb.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
-            rb.count = 8;
+            rb.count = 3;
             rb.memory = V4L2Unmanaged.V4L2_MEMORY_MMAP;
 
             hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_REQBUFS, ref rb);
@@ -178,8 +179,36 @@ namespace V4L2
             hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_DQBUF, ref readbuf);
             if (hr != 0)
             {
+                int err = Marshal.GetLastWin32Error();
+                if (err == 11) // EAGAIN
+                {
+                    return false;
+                }
                 return false;
             }
+
+            // Drain any queued frames to minimize latency; keep only the newest.
+            while (true)
+            {
+                v4l2_buffer next = new v4l2_buffer();
+                next.type = V4L2Unmanaged.FORMAT_TYPE_VIDEO_CAPTURE;
+                next.memory = V4L2Unmanaged.V4L2_MEMORY_MMAP;
+                hr = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_DQBUF, ref next);
+                if (hr != 0)
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    if (err == 11) // EAGAIN
+                    {
+                        break;
+                    }
+                    break;
+                }
+
+                // Requeue the older buffer, keep the newest.
+                _ = V4L2Unmanaged.ioctl(devHandle, V4L2Unmanaged.VIDIOC_QBUF, ref readbuf);
+                readbuf = next;
+            }
+
             lastBuffer = readbuf;
 
             Int64 timestamp = (Int64)readbuf.timestamp.tv_sec * 10000000;
