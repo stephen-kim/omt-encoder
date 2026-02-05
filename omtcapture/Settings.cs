@@ -6,6 +6,7 @@ namespace omtcapture
     {
         public VideoSettings Video { get; private set; } = new();
         public AudioSettings Audio { get; private set; } = new();
+        public SendSettings Send { get; private set; } = new();
         public PreviewSettings Preview { get; private set; } = new();
         public WebSettings Web { get; private set; } = new();
 
@@ -23,6 +24,7 @@ namespace omtcapture
 
             settings.Video = VideoSettings.Load(root);
             settings.Audio = AudioSettings.Load(root.SelectSingleNode("audio"));
+            settings.Send = SendSettings.Load(root.SelectSingleNode("send"));
             settings.Preview = PreviewSettings.Load(root.SelectSingleNode("preview"), settings.Video);
             settings.Web = WebSettings.Load(root.SelectSingleNode("web"));
 
@@ -40,6 +42,7 @@ namespace omtcapture
 
             Video.Save(doc, root);
             Audio.Save(doc, root);
+            Send.Save(doc, root);
             Preview.Save(doc, root);
             Web.Save(doc, root);
 
@@ -202,6 +205,66 @@ namespace omtcapture
         {
             XmlNode? node = root.SelectSingleNode(name);
             if (node == null || !float.TryParse(node.InnerText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+            {
+                return fallback;
+            }
+
+            return value;
+        }
+
+        private static void AppendChild(XmlDocument doc, XmlElement root, string name, string value)
+        {
+            XmlElement child = doc.CreateElement(name);
+            child.InnerText = value;
+            root.AppendChild(child);
+        }
+    }
+
+    internal sealed class SendSettings
+    {
+        public int AudioQueueCapacity { get; set; } = 8;
+        public int VideoQueueCapacity { get; set; } = 1;
+        public bool ForceZeroTimestamps { get; set; } = true;
+
+        public static SendSettings Load(XmlNode? root)
+        {
+            SendSettings settings = new();
+            if (root == null)
+            {
+                return settings;
+            }
+
+            settings.AudioQueueCapacity = ReadInt(root, "audioQueueCapacity", settings.AudioQueueCapacity);
+            settings.VideoQueueCapacity = ReadInt(root, "videoQueueCapacity", settings.VideoQueueCapacity);
+            settings.ForceZeroTimestamps = ReadBool(root, "forceZeroTimestamps", settings.ForceZeroTimestamps);
+            return settings;
+        }
+
+        public void Save(XmlDocument doc, XmlElement root)
+        {
+            XmlElement send = doc.CreateElement("send");
+            root.AppendChild(send);
+
+            AppendChild(doc, send, "audioQueueCapacity", AudioQueueCapacity.ToString());
+            AppendChild(doc, send, "videoQueueCapacity", VideoQueueCapacity.ToString());
+            AppendChild(doc, send, "forceZeroTimestamps", ForceZeroTimestamps ? "true" : "false");
+        }
+
+        private static int ReadInt(XmlNode root, string name, int fallback)
+        {
+            XmlNode? node = root.SelectSingleNode(name);
+            if (node == null || !int.TryParse(node.InnerText, out int value))
+            {
+                return fallback;
+            }
+
+            return value;
+        }
+
+        private static bool ReadBool(XmlNode root, string name, bool fallback)
+        {
+            XmlNode? node = root.SelectSingleNode(name);
+            if (node == null || !bool.TryParse(node.InnerText, out bool value))
             {
                 return fallback;
             }

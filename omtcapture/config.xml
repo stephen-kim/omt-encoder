@@ -29,6 +29,11 @@
       <gain>1.0</gain>
     </monitor>
   </audio>
+  <send>
+    <audioQueueCapacity>8</audioQueueCapacity>
+    <videoQueueCapacity>1</videoQueueCapacity>
+    <forceZeroTimestamps>true</forceZeroTimestamps>
+  </send>
   <preview>
     <enabled>false</enabled>
     <output>/dev/fb0</output>

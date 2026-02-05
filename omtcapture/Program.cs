@@ -54,8 +54,8 @@ namespace omtcapture
                 WebServer? webServer = null;
 
                 using (OMTSend send = new OMTSend(settings.Video.Name, OMTQuality.Default))
-                using (ISendQueue sendQueue = new SendCoordinator(send))
                 {
+                    ISendQueue sendQueue = new SendCoordinator(send, settings.Send);
                     audioPipeline = new AudioPipeline(sendQueue, settings.Audio);
                     audioPipeline.Start();
 
@@ -68,7 +68,7 @@ namespace omtcapture
                         webServer = new WebServer(settings.Web.Port,
                             () => settings,
                             DeviceProbe.GetSnapshot,
-                            update => ApplyUpdate(update, ref settings, configFilename, sendQueue, ref audioPipeline, ref videoPipeline));
+                            update => ApplyUpdate(update, ref settings, configFilename, send, ref sendQueue, ref audioPipeline, ref videoPipeline));
                         webServer.Start();
                     }
 
@@ -78,9 +78,11 @@ namespace omtcapture
                     }
                 }
 
-                audioPipeline?.Stop();
-                videoPipeline?.Stop();
-                webServer?.Dispose();
+                    audioPipeline?.Stop();
+                    videoPipeline?.Stop();
+                    webServer?.Dispose();
+                    sendQueue.Dispose();
+                }
             }
             catch (Exception ex)
             {
@@ -99,12 +101,14 @@ namespace omtcapture
             SettingsUpdate update,
             ref Settings settings,
             string configPath,
-            ISendQueue sendQueue,
+            OMTSend send,
+            ref ISendQueue sendQueue,
             ref AudioPipeline? audioPipeline,
             ref VideoPipeline? videoPipeline)
         {
             bool videoChanged;
             bool audioChanged;
+            bool sendChanged;
             bool previewChanged;
             bool webChanged;
             bool nameChanged;
@@ -113,16 +117,33 @@ namespace omtcapture
             {
                 videoChanged = !VideoEquals(settings.Video, update.Video);
                 audioChanged = !AudioEquals(settings.Audio, update.Audio);
+                sendChanged = !SendEquals(settings.Send, update.Send);
                 previewChanged = !PreviewEquals(settings.Preview, update.Preview);
                 webChanged = !WebEquals(settings.Web, update.Web);
                 nameChanged = settings.Video.Name != update.Video.Name;
 
                 CopyVideo(settings.Video, update.Video);
                 CopyAudio(settings.Audio, update.Audio);
+                CopySend(settings.Send, update.Send);
                 CopyPreview(settings.Preview, update.Preview);
                 CopyWeb(settings.Web, update.Web);
 
                 settings.Save(configPath);
+            }
+
+            if (sendChanged)
+            {
+                audioPipeline?.Stop();
+                videoPipeline?.Stop();
+                sendQueue.Dispose();
+                sendQueue = new SendCoordinator(send, settings.Send);
+                audioPipeline = new AudioPipeline(sendQueue, settings.Audio);
+                audioPipeline.Start();
+                videoPipeline = new VideoPipeline(sendQueue, settings.Video);
+                videoPipeline.UpdatePreview(settings.Preview);
+                videoPipeline.Start();
+                audioChanged = false;
+                videoChanged = false;
             }
 
             if (audioChanged)
@@ -185,7 +206,18 @@ namespace omtcapture
                 left.Channels == right.Channels &&
                 left.SamplesPerChannel == right.SamplesPerChannel &&
                 Math.Abs(left.MixGain - right.MixGain) < 0.0001f &&
+                left.ArecordBufferUsec == right.ArecordBufferUsec &&
+                left.ArecordPeriodUsec == right.ArecordPeriodUsec &&
+                left.RestartAfterFailedReads == right.RestartAfterFailedReads &&
+                left.RestartCooldownMs == right.RestartCooldownMs &&
                 MonitorEquals(left.Monitor, right.Monitor);
+        }
+
+        private static bool SendEquals(SendSettings left, SendSettings right)
+        {
+            return left.AudioQueueCapacity == right.AudioQueueCapacity &&
+                left.VideoQueueCapacity == right.VideoQueueCapacity &&
+                left.ForceZeroTimestamps == right.ForceZeroTimestamps;
         }
 
         private static bool MonitorEquals(MonitorSettings left, MonitorSettings right)
@@ -232,6 +264,10 @@ namespace omtcapture
             target.Channels = source.Channels;
             target.SamplesPerChannel = source.SamplesPerChannel;
             target.MixGain = source.MixGain;
+            target.ArecordBufferUsec = source.ArecordBufferUsec;
+            target.ArecordPeriodUsec = source.ArecordPeriodUsec;
+            target.RestartAfterFailedReads = source.RestartAfterFailedReads;
+            target.RestartCooldownMs = source.RestartCooldownMs;
 
             target.Monitor.Enabled = source.Monitor.Enabled;
             target.Monitor.Device = source.Monitor.Device;
@@ -252,6 +288,13 @@ namespace omtcapture
                 target.HdmiDevice = string.Empty;
                 target.TrsDevice = string.Empty;
             }
+        }
+
+        private static void CopySend(SendSettings target, SendSettings source)
+        {
+            target.AudioQueueCapacity = source.AudioQueueCapacity;
+            target.VideoQueueCapacity = source.VideoQueueCapacity;
+            target.ForceZeroTimestamps = source.ForceZeroTimestamps;
         }
 
         private static void CopyPreview(PreviewSettings target, PreviewSettings source)

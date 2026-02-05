@@ -269,95 +269,91 @@ namespace omtcapture
 <meta name=""viewport"" content=""width=device-width, initial-scale=1"" />
 <title>OMT Capture Control</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 :root {
-  --bg-0: #0b0f14;
-  --bg-1: #121923;
-  --bg-2: #0f1319;
-  --card: #131a24;
-  --card-2: #0f141c;
-  --border: #273142;
+  --bg-0: #070a0f;
+  --bg-1: #0c121a;
+  --bg-2: #101824;
+  --card: #0f1722;
+  --card-2: #101b28;
+  --border: #1f2a3a;
   --muted: #9aa4b2;
-  --text: #e5e9f0;
-  --accent: #4cc9f0;
-  --accent-2: #7cf3c9;
+  --text: #e7eef8;
+  --accent: #ffb347;
+  --accent-2: #56d4ff;
+  --accent-3: #6ef7c7;
   --danger: #ff6b6b;
-  --shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  --shadow: 0 22px 50px rgba(4, 8, 16, 0.5);
 }
 
 * { box-sizing: border-box; }
 
 body {
-  font-family: ""Space Grotesk"", ""IBM Plex Sans"", ""Manrope"", sans-serif;
+  font-family: ""Sora"", ""Space Grotesk"", ""Work Sans"", system-ui, -apple-system, sans-serif;
   margin: 0;
-  padding: 28px 16px 48px;
+  padding: 32px 16px 56px;
   color: var(--text);
   background:
-    radial-gradient(700px 400px at 10% -10%, rgba(76, 201, 240, 0.18), transparent),
-    radial-gradient(700px 400px at 90% -10%, rgba(124, 243, 201, 0.14), transparent),
-    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    radial-gradient(800px 440px at 12% -10%, rgba(86, 212, 255, 0.16), transparent 70%),
+    radial-gradient(900px 520px at 92% -20%, rgba(110, 247, 199, 0.14), transparent 70%),
+    linear-gradient(180deg, var(--bg-2), var(--bg-0));
   min-height: 100vh;
 }
 
 .page {
-  max-width: 600px;
+  max-width: 980px;
   margin: 0 auto;
   display: grid;
-  gap: 16px;
+  gap: 20px;
+}
+
+.hero {
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 179, 71, 0.12), rgba(86, 212, 255, 0.08));
+  border: 1px solid rgba(86, 212, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  box-shadow: var(--shadow);
+}
+
+.kicker {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 6px;
 }
 
 h1 {
   font-size: 28px;
-  margin: 8px 0 6px;
-  letter-spacing: 0.2px;
+  margin: 0 0 6px;
 }
 
-h2 {
-  font-size: 16px;
-  text-transform: uppercase;
-  letter-spacing: 1.6px;
+.sub {
+  margin: 0;
   color: var(--muted);
-  margin: 0 0 12px;
+  font-size: 14px;
 }
 
-h3 {
-  font-size: 16px;
-  margin: 14px 0 6px;
-  color: var(--text);
-}
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 12px;
-}
-.section-title .dot {
-  width: 8px;
-  height: 8px;
+.status-pill {
+  padding: 8px 12px;
   border-radius: 999px;
-  background: #4cc9f0;
-  box-shadow: 0 0 10px rgba(76, 201, 240, 0.4);
-}
-.section-title .pill {
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(76, 201, 240, 0.16);
-  color: #8fe3ff;
-  border: 1px solid rgba(76, 201, 240, 0.3);
-}
-.section-title.outputs .dot {
-  background: #ffd666;
-  box-shadow: 0 0 10px rgba(255, 214, 102, 0.45);
-}
-.section-title.outputs .pill {
-  background: rgba(255, 214, 102, 0.18);
-  color: #ffe08a;
-  border-color: rgba(255, 214, 102, 0.35);
+  background: rgba(86, 212, 255, 0.14);
+  border: 1px solid rgba(86, 212, 255, 0.35);
+  font-weight: 600;
+  font-size: 12px;
 }
 
-section {
+.meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card {
   background: linear-gradient(180deg, var(--card), var(--card-2));
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -365,13 +361,34 @@ section {
   box-shadow: var(--shadow);
 }
 
+.card-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 12px;
+}
+
 label {
   display: block;
   font-weight: 600;
   margin-top: 10px;
-  color: var(--muted);
+  color: var(--text);
   font-size: 13px;
-  letter-spacing: 0.2px;
+}
+
+.help {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+  line-height: 1.4;
 }
 
 input, select, textarea {
@@ -380,29 +397,29 @@ input, select, textarea {
   margin-top: 6px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: #0d1219;
+  background: #0c1219;
   color: var(--text);
   outline: none;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 input:focus, select:focus, textarea:focus {
-  border-color: rgba(76, 201, 240, 0.6);
-  box-shadow: 0 0 0 3px rgba(76, 201, 240, 0.14);
+  border-color: rgba(86, 212, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(86, 212, 255, 0.12);
 }
 
-input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-2); }
 
 button {
   margin-top: 14px;
   padding: 10px 16px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #071218;
+  color: #0b1119;
   border: none;
   border-radius: 10px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(76, 201, 240, 0.25);
+  box-shadow: 0 10px 24px rgba(86, 212, 255, 0.25);
 }
 
 button:hover { transform: translateY(-1px); }
@@ -418,70 +435,75 @@ pre {
 
 small { color: var(--muted); display: block; margin-top: 8px; }
 
-details { margin-top: 10px; }
-
 .check-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .check-row label { margin: 0; font-weight: 600; color: var(--text); }
 .check-grid { display: grid; gap: 8px; margin-top: 8px; }
 .check-item { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 6px; }
-.col { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1219; }
-@media (max-width: 720px) {
-  .two-col { grid-template-columns: 1fr; }
+
+.grid {
+  display: grid;
+  gap: 16px;
 }
 
-.fade-in { animation: fadeIn 300ms ease-out; }
+.grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inline.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .grid.two { grid-template-columns: 1fr; }
+  .inline, .inline.three { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: flex-start; }
+}
+
+.fade-in { animation: fadeIn 320ms ease-out; }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 </style>
 </head>
 <body>
 <div class=""page fade-in"">
-  <h1>OMT Capture Control</h1>
-  <section>
-    <h2>Config</h2>
-    <div id=""status""></div>
-    <small id=""displayMode""></small>
-
-    <div class=""two-col"">
-      <div class=""col"">
-        <div class=""section-title"">
-          <span class=""dot""></span>
-          <span class=""pill"">Inputs</span>
-        </div>
-        <label>Video device</label>
-        <select id=""videoDevicePath""></select>
-        <h4>Audio inputs</h4>
-        <div id=""audioInputDevices"" class=""check-grid""></div>
-        <small>Select one or two inputs to mix. Leave unchecked for no audio.</small>
-      </div>
-      <div class=""col"">
-        <div class=""section-title outputs"">
-          <span class=""dot""></span>
-          <span class=""pill"">Outputs</span>
-        </div>
-        <h4>Audio output</h4>
-        <div class=""check-row"">
-          <input id=""monitorEnabled"" type=""checkbox"" />
-          <label for=""monitorEnabled"">Monitor output</label>
-        </div>
-        <label>Monitor device</label>
-        <select id=""monitorDevice""></select>
-        <h4>Preview output</h4>
-        <div class=""check-row"">
-          <input id=""previewEnabled"" type=""checkbox"" />
-          <label for=""previewEnabled"">Preview enabled</label>
-        </div>
-        <label>Preview outputs</label>
-        <div id=""previewOutputs"" class=""check-grid""></div>
-      </div>
+  <header class=""hero"">
+    <div>
+      <div class=""kicker"">OMT Capture</div>
+      <h1>Control Deck</h1>
+      <p class=""sub"">Low-latency ingest, transport, and monitoring controls.</p>
     </div>
+    <div>
+      <div id=""status"" class=""status-pill"">Loading…</div>
+      <div id=""displayMode"" class=""meta""></div>
+    </div>
+  </header>
 
-    <details>
-      <summary>Advanced settings</summary>
+  <section class=""grid two"">
+    <div class=""card"">
+      <div class=""card-title"">Video Input</div>
+      <label>Video device</label>
+      <select id=""videoDevicePath""></select>
+      <div class=""help"">V4L2 device that provides HDMI capture.</div>
+
+      <label>Source name</label>
+      <input id=""videoName"" />
+      <div class=""help"">Shown in the receiver list. Keep it short and unique.</div>
+
+      <div class=""check-row"">
+        <input id=""videoUseNative"" type=""checkbox"" onchange=""toggleNativeInputs()"" />
+        <label for=""videoUseNative"">Use native input format (no transform)</label>
+      </div>
+      <div class=""help"">Bypass scaling and pixel conversion for lowest latency.</div>
+
       <label>Resolution preset</label>
       <select id=""videoPreset"" onchange=""applyVideoPreset()"">
         <option value=""custom"">Custom</option>
@@ -490,56 +512,170 @@ details { margin-top: 10px; }
         <option value=""uhd-yuy2"">UHD (3840x2160, YUY2)</option>
         <option value=""uhd-nv12"">UHD (3840x2160, NV12)</option>
       </select>
-      <label>Source name</label>
-      <input id=""videoName"" />
-      <label>Width</label>
-      <input id=""videoWidth"" type=""number"" />
-      <label>Height</label>
-      <input id=""videoHeight"" type=""number"" />
-      <label>Frame rate numerator</label>
-      <input id=""videoFrameRateN"" type=""number"" />
-      <label>Frame rate denominator</label>
-      <input id=""videoFrameRateD"" type=""number"" />
-      <div class=""check-row"">
-        <input id=""videoUseNative"" type=""checkbox"" onchange=""toggleNativeInputs()"" />
-        <label for=""videoUseNative"">Use native input format (no transform)</label>
+      <div class=""help"">Choose a preset or dial in a custom format.</div>
+
+      <div class=""inline"">
+        <div>
+          <label>Width</label>
+          <input id=""videoWidth"" type=""number"" />
+        </div>
+        <div>
+          <label>Height</label>
+          <input id=""videoHeight"" type=""number"" />
+        </div>
       </div>
+      <div class=""help"">Output resolution when not using native mode.</div>
+
+      <div class=""inline"">
+        <div>
+          <label>Frame rate numerator</label>
+          <input id=""videoFrameRateN"" type=""number"" />
+        </div>
+        <div>
+          <label>Frame rate denominator</label>
+          <input id=""videoFrameRateD"" type=""number"" />
+        </div>
+      </div>
+      <div class=""help"">Example: 30000 / 1001 for 29.97 fps.</div>
+
       <label>Codec</label>
       <select id=""videoCodec"">
         <option value=""UYVY"">UYVY</option>
         <option value=""YUY2"">YUY2</option>
         <option value=""NV12"">NV12</option>
       </select>
-      <label>Sample rate</label>
-      <input id=""audioSampleRate"" type=""number"" />
-      <label>Channels</label>
-      <input id=""audioChannels"" type=""number"" />
+      <div class=""help"">Pixel format sent over OMT when not native.</div>
+    </div>
+
+    <div class=""card"">
+      <div class=""card-title"">Audio Input</div>
+      <div class=""section-label"">Capture sources</div>
+      <div id=""audioInputDevices"" class=""check-grid""></div>
+      <div class=""help"">Select up to two inputs to mix. Leave empty for silent.</div>
+
+      <div class=""inline"">
+        <div>
+          <label>Sample rate (Hz)</label>
+          <input id=""audioSampleRate"" type=""number"" />
+        </div>
+        <div>
+          <label>Channels</label>
+          <input id=""audioChannels"" type=""number"" />
+        </div>
+      </div>
+      <div class=""help"">Keep in sync with the HDMI source when possible.</div>
+
+      <label>Samples per channel</label>
+      <input id=""audioSamplesPerChannel"" type=""number"" />
+      <div class=""help"">Audio packet size. Lower = lower latency, higher = more stability.</div>
+
       <label>Mix gain: <span id=""gainDisplay""></span></label>
       <input id=""audioMixGain"" type=""range"" min=""0"" max=""10"" step=""0.1"" oninput=""document.getElementById('gainDisplay').innerText = this.value"" onchange=""saveConfig()"" />
+      <div class=""help"">Applied after mixing HDMI/TRS inputs.</div>
+
+      <div class=""section-label"">ALSA tuning</div>
+      <div class=""inline"">
+        <div>
+          <label>arecord buffer (usec)</label>
+          <input id=""audioArecordBufferUsec"" type=""number"" />
+        </div>
+        <div>
+          <label>arecord period (usec)</label>
+          <input id=""audioArecordPeriodUsec"" type=""number"" />
+        </div>
+      </div>
+      <div class=""help"">Larger buffers reduce underruns but add delay.</div>
+
+      <div class=""inline"">
+        <div>
+          <label>Restart after failed reads</label>
+          <input id=""audioRestartAfterFailedReads"" type=""number"" />
+        </div>
+        <div>
+          <label>Restart cooldown (ms)</label>
+          <input id=""audioRestartCooldownMs"" type=""number"" />
+        </div>
+      </div>
+      <div class=""help"">Auto-restarts the audio pipeline when the device stalls.</div>
+
+      <div class=""section-label"">Monitor output</div>
+      <div class=""check-row"">
+        <input id=""monitorEnabled"" type=""checkbox"" />
+        <label for=""monitorEnabled"">Monitor enabled</label>
+      </div>
+      <label>Monitor device</label>
+      <select id=""monitorDevice""></select>
       <label>Monitor gain</label>
       <input id=""monitorGain"" type=""number"" step=""0.01"" />
-      <label>Preview fps</label>
-      <input id=""previewFps"" type=""number"" />
-      <label>Preview pixel format</label>
-      <input id=""previewPixelFormat"" />
+      <div class=""help"">Applies only to the local monitor output.</div>
+    </div>
+  </section>
+
+  <section class=""grid two"">
+    <div class=""card"">
+      <div class=""card-title"">Transport</div>
+      <label>Audio queue capacity</label>
+      <input id=""sendAudioQueueCapacity"" type=""number"" />
+      <div class=""help"">Buffered audio packets before dropping oldest. Helps smooth jitter.</div>
+
+      <label>Video queue capacity</label>
+      <input id=""sendVideoQueueCapacity"" type=""number"" />
+      <div class=""help"">How many frames can wait before dropping. Keep small for low latency.</div>
+
+      <div class=""check-row"">
+        <input id=""sendForceZeroTimestamps"" type=""checkbox"" />
+        <label for=""sendForceZeroTimestamps"">Force zero timestamps</label>
+      </div>
+      <div class=""help"">Reduces receiver buffering. Can break strict A/V sync in some players.</div>
+    </div>
+
+    <div class=""card"">
+      <div class=""card-title"">Preview</div>
+      <div class=""check-row"">
+        <input id=""previewEnabled"" type=""checkbox"" />
+        <label for=""previewEnabled"">Preview enabled</label>
+      </div>
+      <div class=""help"">Preview is rendered locally to framebuffer devices.</div>
+
+      <label>Preview outputs</label>
+      <div id=""previewOutputs"" class=""check-grid""></div>
+
+      <div class=""inline"">
+        <div>
+          <label>Preview fps</label>
+          <input id=""previewFps"" type=""number"" />
+        </div>
+        <div>
+          <label>Preview pixel format</label>
+          <input id=""previewPixelFormat"" />
+        </div>
+      </div>
+      <div class=""help"">Lower preview fps to save CPU when the main stream is stable.</div>
+    </div>
+  </section>
+
+  <section class=""grid two"">
+    <div class=""card"">
+      <div class=""card-title"">Web Service</div>
       <label>Web port</label>
       <input id=""webPort"" type=""number"" />
-    </details>
+      <div class=""help"">Requires service restart to apply.</div>
+      <button onclick=""saveConfig()"">Save changes</button>
+      <small>Video changes apply without reboot. Web port changes require restart.</small>
+    </div>
 
-    <button onclick=""saveConfig()"">Save</button>
-    <small>Video changes apply without reboot. Web port changes require restart.</small>
-  </section>
-  <section>
-    <h2>Devices</h2>
-    <button onclick=""loadDevices()"">Refresh</button>
-    <h3>Audio inputs</h3>
-    <pre id=""audioInputs""></pre>
-    <h3>Audio outputs</h3>
-    <pre id=""audioOutputs""></pre>
-    <h3>Video devices</h3>
-    <pre id=""videoDevices""></pre>
-    <h3>Framebuffers</h3>
-    <pre id=""framebuffers""></pre>
+    <div class=""card"">
+      <div class=""card-title"">Devices</div>
+      <button onclick=""loadDevices()"">Refresh</button>
+      <div class=""section-label"">Audio inputs</div>
+      <pre id=""audioInputs""></pre>
+      <div class=""section-label"">Audio outputs</div>
+      <pre id=""audioOutputs""></pre>
+      <div class=""section-label"">Video devices</div>
+      <pre id=""videoDevices""></pre>
+      <div class=""section-label"">Framebuffers</div>
+      <pre id=""framebuffers""></pre>
+    </div>
   </section>
 </div>
 <script>
@@ -613,8 +749,6 @@ function parseAlsaDevices(text) {
       const card = match[1];
       const device = match[3];
       const name = match[2].trim();
-      // Use stable name if valid (alphanumeric+), else fall back to index
-      // ALSA Names from 'arecord -l' are usually safe short IDs.
       let value = `hw:${card},${device}`;
       if (/^[a-zA-Z0-9_\-]+$/.test(name)) {
           value = `hw:CARD=${name},DEV=${device}`;
@@ -797,8 +931,14 @@ async function loadConfig() {
 
   document.getElementById('audioSampleRate').value = data.audio.sampleRate;
   document.getElementById('audioChannels').value = data.audio.channels;
+  document.getElementById('audioSamplesPerChannel').value = data.audio.samplesPerChannel;
   document.getElementById('audioMixGain').value = data.audio.mixGain;
   document.getElementById('gainDisplay').innerText = data.audio.mixGain;
+  document.getElementById('audioArecordBufferUsec').value = data.audio.arecordBufferUsec;
+  document.getElementById('audioArecordPeriodUsec').value = data.audio.arecordPeriodUsec;
+  document.getElementById('audioRestartAfterFailedReads').value = data.audio.restartAfterFailedReads;
+  document.getElementById('audioRestartCooldownMs').value = data.audio.restartCooldownMs;
+
   document.getElementById('monitorEnabled').checked = data.audio.monitor.enabled;
   document.getElementById('monitorGain').value = data.audio.monitor.gain;
 
@@ -806,6 +946,10 @@ async function loadConfig() {
   setPreviewOutputs(data.preview.outputDevices || []);
   document.getElementById('previewFps').value = data.preview.fps;
   document.getElementById('previewPixelFormat').value = data.preview.pixelFormat;
+
+  document.getElementById('sendAudioQueueCapacity').value = data.send.audioQueueCapacity;
+  document.getElementById('sendVideoQueueCapacity').value = data.send.videoQueueCapacity;
+  document.getElementById('sendForceZeroTimestamps').checked = data.send.forceZeroTimestamps;
 
   document.getElementById('webPort').value = data.web.port;
 }
@@ -837,7 +981,13 @@ async function saveConfig() {
   }
   payload.audio.sampleRate = Number(document.getElementById('audioSampleRate').value);
   payload.audio.channels = Number(document.getElementById('audioChannels').value);
+  payload.audio.samplesPerChannel = Number(document.getElementById('audioSamplesPerChannel').value);
   payload.audio.mixGain = Number(document.getElementById('audioMixGain').value);
+  payload.audio.arecordBufferUsec = Number(document.getElementById('audioArecordBufferUsec').value);
+  payload.audio.arecordPeriodUsec = Number(document.getElementById('audioArecordPeriodUsec').value);
+  payload.audio.restartAfterFailedReads = Number(document.getElementById('audioRestartAfterFailedReads').value);
+  payload.audio.restartCooldownMs = Number(document.getElementById('audioRestartCooldownMs').value);
+
   payload.audio.monitor.enabled = document.getElementById('monitorEnabled').checked;
   payload.audio.monitor.device = document.getElementById('monitorDevice').value;
   payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
@@ -846,6 +996,10 @@ async function saveConfig() {
   payload.preview.outputDevices = getPreviewOutputs();
   payload.preview.fps = Number(document.getElementById('previewFps').value);
   payload.preview.pixelFormat = document.getElementById('previewPixelFormat').value;
+
+  payload.send.audioQueueCapacity = Number(document.getElementById('sendAudioQueueCapacity').value);
+  payload.send.videoQueueCapacity = Number(document.getElementById('sendVideoQueueCapacity').value);
+  payload.send.forceZeroTimestamps = document.getElementById('sendForceZeroTimestamps').checked;
 
   payload.web.port = Number(document.getElementById('webPort').value);
 
@@ -871,6 +1025,7 @@ loadConfig().then(loadDevices);
     {
         public VideoSettings Video { get; set; } = new();
         public AudioSettings Audio { get; set; } = new();
+        public SendSettings Send { get; set; } = new();
         public PreviewSettings Preview { get; set; } = new();
         public WebSettings Web { get; set; } = new();
 
@@ -880,6 +1035,7 @@ loadConfig().then(loadDevices);
             {
                 Video = settings.Video,
                 Audio = settings.Audio,
+                Send = settings.Send,
                 Preview = settings.Preview,
                 Web = settings.Web
             };

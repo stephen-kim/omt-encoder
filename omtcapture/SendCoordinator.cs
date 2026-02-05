@@ -42,17 +42,23 @@ namespace omtcapture
         private readonly BlockingCollection<SendItem> _videoQueue;
         private readonly CancellationTokenSource _cts = new();
         private readonly Thread _thread;
+        private readonly bool _forceZeroTimestamps;
         private int _audioDropped;
         private int _videoDropped;
         private int _audioSendZero;
         private int _videoSendZero;
         private DateTime _lastLog = DateTime.MinValue;
 
-        public SendCoordinator(OMTSend send, int audioQueueCapacity = 8, int videoQueueCapacity = 1)
+        private static readonly double TimestampTo100Ns = 10_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        public SendCoordinator(OMTSend send, SendSettings settings)
         {
             _send = send;
-            _audioQueue = new BlockingCollection<SendItem>(audioQueueCapacity);
-            _videoQueue = new BlockingCollection<SendItem>(videoQueueCapacity);
+            int audioCapacity = Clamp(settings.AudioQueueCapacity, 1, 16);
+            int videoCapacity = Clamp(settings.VideoQueueCapacity, 1, 8);
+            _forceZeroTimestamps = settings.ForceZeroTimestamps;
+            _audioQueue = new BlockingCollection<SendItem>(audioCapacity);
+            _videoQueue = new BlockingCollection<SendItem>(videoCapacity);
             _thread = new Thread(SendLoop)
             {
                 IsBackground = true,
@@ -146,8 +152,7 @@ namespace omtcapture
 
         private void SendItemNow(SendItem item, bool isAudio)
         {
-            // Force zero timestamps to avoid receiver-side buffering based on timestamps.
-            item.Frame.Timestamp = 0;
+            item.Frame.Timestamp = _forceZeroTimestamps ? 0 : GetMonotonicTimestamp100ns();
             int sent = _send.Send(item.Frame);
             if (sent == 0)
             {
@@ -163,6 +168,18 @@ namespace omtcapture
 
             item.Dispose();
             LogStats();
+        }
+
+        private static int Clamp(int value, int min, int max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        private static long GetMonotonicTimestamp100ns()
+        {
+            return (long)(System.Diagnostics.Stopwatch.GetTimestamp() * TimestampTo100Ns);
         }
 
 
