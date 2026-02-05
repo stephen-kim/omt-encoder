@@ -69,8 +69,10 @@ namespace omtcapture
         public void Start()
         {
             string mode = _settings.Mode.Trim().ToLowerInvariant();
+            Console.WriteLine($"Audio pipeline start requested. Mode={mode}");
             if (mode == "none")
             {
+                Console.WriteLine("Audio pipeline disabled (mode=none).");
                 return;
             }
             if (mode != "hdmi" && mode != "trs" && mode != "both")

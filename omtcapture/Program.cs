@@ -49,6 +49,7 @@ namespace omtcapture
                 }
 
                 Settings settings = Settings.Load(configFilename);
+                Console.WriteLine($"Audio settings: mode={settings.Audio.Mode}, hdmiDevice={settings.Audio.HdmiDevice}, trsDevice={settings.Audio.TrsDevice}, rate={settings.Audio.SampleRate}, channels={settings.Audio.Channels}");
                 AudioPipeline? audioPipeline = null;
                 VideoPipeline? videoPipeline = null;
                 WebServer? webServer = null;
