@@ -1,3 +1,15 @@
 .idea
 .idea/*
 .DS_Store
+
+# Rust build artifacts
+target/
+rust_port/target/
+
+# Configuration
+rust_port/config.json
+
+# IDE/Misc
+.vscode/
+*.swp
+*.bak

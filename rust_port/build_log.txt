@@ -1,0 +1,490 @@
+warning: libvmx-sys@0.1.0: TARGET_ARCH=aarch64
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:531:13: warning: comparison of integers of different signs: 'uint32_t' (aka 'unsigned int') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:   531 |                                 if (len > d.MaxStreamLength) return VMX_ERR_BUFFER_OVERFLOW;
+warning: libvmx-sys@0.1.0:       |                                     ~~~ ^ ~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:546:14: warning: comparison of integers of different signs: 'uint32_t' (aka 'unsigned int') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:   546 |                                         if (len > d.MaxStreamLength) return VMX_ERR_BUFFER_OVERFLOW;
+warning: libvmx-sys@0.1.0:       |                                             ~~~ ^ ~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:36: warning: unused parameter 'instance' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                    ^
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:54: warning: unused parameter 'src' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                                      ^
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:67: warning: unused parameter 'dst' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                                                   ^
+warning: libvmx-sys@0.1.0: 5 warnings generated.
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1604:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1604 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1606:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1606 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1631:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1631 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1632:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1632 |         FLUSHREMAININGREADBITS(dataAC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1725:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1725 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1727:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1727 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1753:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1753 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1754:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1754 |         FLUSHREMAININGREADBITS(dataAC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1795:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1795 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1797:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1797 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1814:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1814 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:2031:8: warning: unused variable 'pSrc' [-Wunused-variable]
+warning: libvmx-sys@0.1.0:  2031 |         BYTE* pSrc = alignedSrc;
+warning: libvmx-sys@0.1.0:       |               ^~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:2150:8: warning: unused variable 'pDst' [-Wunused-variable]
+warning: libvmx-sys@0.1.0:  2150 |         BYTE* pDst = alignedDst;
+warning: libvmx-sys@0.1.0:       |               ^~~~
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec_arm.cpp:26:
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec_arm.h:26:
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec.h:29:
+warning: libvmx-sys@0.1.0: ../../libvmx/src/thread_tasks.h:106:21: warning: unused function 'CreateTasks' [-Wunused-function]
+warning: libvmx-sys@0.1.0:   106 | static ThreadTasks* CreateTasks(int numThreads)
+warning: libvmx-sys@0.1.0:       |                     ^~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/thread_tasks.h:120:13: warning: unused function 'DestroyTasks' [-Wunused-function]
+warning: libvmx-sys@0.1.0:   120 | static void DestroyTasks(ThreadTasks* tasks)
+warning: libvmx-sys@0.1.0:       |             ^~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: 15 warnings generated.
+    Checking libvmx-sys v0.1.0 (/Users/stephen/dev/omt-encode/rust_port/libvmx-sys)
+error[E0428]: the name `char_type` is defined multiple times
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:27958:1
+      |
+27957 | pub type char_type = u16;
+      | ------------------------- previous definition of the type `char_type` here
+27958 | pub type char_type = u32;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^ `char_type` redefined here
+      |
+      = note: `char_type` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `rep` is defined multiple times
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:28257:1
+      |
+28236 | pub type rep = ::std::os::raw::c_longlong;
+      | ------------------------------------------ previous definition of the type `rep` here
+...
+28257 | pub type rep = ::std::os::raw::c_longlong;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `rep` redefined here
+      |
+      = note: `rep` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `type_` is defined multiple times
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:29229:1
+      |
+28115 | pub type type_ = ::std::os::raw::c_uint;
+      | ---------------------------------------- previous definition of the type `type_` here
+...
+29229 | pub type type_ = difference_type;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `type_` redefined here
+      |
+      = note: `type_` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `std___1___forward_list_node_value_type` is defined multiple times
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13693:1
+      |
+13661 | pub struct std___1___forward_list_node_value_type {
+      | ------------------------------------------------- previous definition of the type `std___1___forward_list_node_value_type` here
+...
+13693 | pub type std___1___forward_list_node_value_type<_Tp> = _Tp;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `std___1___forward_list_node_value_type` redefined here
+      |
+      = note: `std___1___forward_list_node_value_type` must be defined only once in the type namespace of this module
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:1262:31
+     |
+1262 |     pub static std___1_value: _Tp;
+     |                               ^^^ not found in this scope
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:2118:61
+     |
+2118 | ...add_pointer_t<_Tp>;
+     |                  ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+2118 | pub type std___1_add_pointer_type<_Tp> = std___1___add_pointer_t<_Tp>;
+     |                                  +++++
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:2134:49
+     |
+2134 | pub type std___1_decay_type = std___1___decay_t<_Tp>;
+     |                                                 ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+2134 | pub type std___1_decay_type<_Tp> = std___1___decay_t<_Tp>;
+     |                            +++++
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:2218:79
+     |
+2218 | ...e_reference_t<_Tp>;
+     |                  ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+2218 | pub type std___1_add_lvalue_reference_type<_Tp> = std___1___add_lvalue_reference_t<_Tp>;
+     |                                           +++++
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:2467:61
+     |
+2467 | ...make_signed_t<_Tp>;
+     |                  ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+2467 | pub type std___1_make_signed_type<_Tp> = std___1___make_signed_t<_Tp>;
+     |                                  +++++
+
+error[E0425]: cannot find type `_Pred` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:3081:49
+     |
+3081 | pub type std___1__IsCharLikeType = std___1__And<_Pred>;
+     |                                                 ^^^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+3081 | pub type std___1__IsCharLikeType<_Pred> = std___1__And<_Pred>;
+     |                                 +++++++
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:3224:65
+     |
+3224 | ...ke_unsigned_t<_Tp>;
+     |                  ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+3224 | pub type std___1_make_unsigned_type<_Tp> = std___1___make_unsigned_t<_Tp>;
+     |                                    +++++
+
+error[E0425]: cannot find type `_Type` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:4255:74
+     |
+4255 | ...h_helper_imp<_Type>;
+     |                 ^^^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+4255 | pub type std___1___enable_hash_helper<_Type> = std___1___enable_hash_helper_imp<_Type>;
+     |                                      +++++++
+
+error[E0425]: cannot find type `_Tp` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:5907:77
+     |
+5907 | ...emove_cvref_t<_Tp>;
+     |                  ^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+5907 | pub type std___1___uses_alloc_ctor_imp__RawAlloc<_Tp> = std___1___remove_cvref_t<_Tp>;
+     |                                                 +++++
+
+error[E0425]: cannot find type `_Pred` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:5937:29
+     |
+5937 |     pub _base: std___1__And<_Pred>,
+     |                             ^^^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+5936 | pub struct std___1_tuple__EnableUTypesCtor<_Pred> {
+     |                                           +++++++
+
+error[E0425]: cannot find type `_Pred` in this scope
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:7060:29
+     |
+7060 |     pub _base: std___1__And<_Pred>,
+     |                             ^^^^^ not found in this scope
+     |
+help: you might be missing a type parameter
+     |
+7059 | pub struct std___1___raw_pointer_compatible_with<_Pred> {
+     |                                                 +++++++
+
+error[E0425]: cannot find type `_ValueType` in this scope
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:12085:38
+      |
+12085 |     pub static std___1___block_size: _ValueType;
+      |                                      ^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `_NodePtr` in this scope
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13686:65
+      |
+13686 | ...begin_node<_NodePtr>;
+      |               ^^^^^^^^ not found in this scope
+      |
+help: you might be missing a type parameter
+      |
+13686 | pub type std___1___begin_node_of<_NodePtr> = std___1___forward_begin_node<_NodePtr>;
+      |                                 ++++++++++
+
+error[E0107]: missing generics for type alias `std___1___forward_list_node_value_type`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13660:17
+      |
+13660 | #[derive(Debug, Copy, Clone)]
+      |                 ^^^^ expected 1 generic argument
+      |
+note: type alias defined here, with 1 generic parameter: `_Tp`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13693:10
+      |
+13693 | pub type std___1___forward_list_node_value_type<_Tp> = _Tp;
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ---
+help: add missing generic argument
+      |
+13660 | #[derive(Debug, Copy<_Tp>, Clone)]
+      |                     +++++
+
+error[E0206]: the trait `Copy` cannot be implemented for this type
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13660:17
+      |
+13660 | #[derive(Debug, Copy, Clone)]
+      |                 ^^^^ type is not a structure or enumeration
+
+error[E0107]: missing generics for type alias `std___1___forward_list_node_value_type`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13660:23
+      |
+13660 | #[derive(Debug, Copy, Clone)]
+      |                       ^^^^^ expected 1 generic argument
+      |
+note: type alias defined here, with 1 generic parameter: `_Tp`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13693:10
+      |
+13693 | pub type std___1___forward_list_node_value_type<_Tp> = _Tp;
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ---
+help: add missing generic argument
+      |
+13660 | #[derive(Debug, Copy, Clone<_Tp>)]
+      |                            +++++
+
+error[E0107]: missing generics for type alias `std___1___forward_list_node_value_type`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13660:10
+      |
+13660 | #[derive(Debug, Copy, Clone)]
+      |          ^^^^^ expected 1 generic argument
+      |
+note: type alias defined here, with 1 generic parameter: `_Tp`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13693:10
+      |
+13693 | pub type std___1___forward_list_node_value_type<_Tp> = _Tp;
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ---
+help: add missing generic argument
+      |
+13660 | #[derive(Debug<_Tp>, Copy, Clone)]
+      |               +++++
+
+error[E0740]: field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union
+    --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:8525:5
+     |
+8525 |     pub __obj_: _Tp,
+     |     ^^^^^^^^^^^^^^^
+     |
+     = note: union fields must not have drop side-effects, which is currently enforced via either `Copy` or `ManuallyDrop<...>`
+help: wrap the field type in `ManuallyDrop<...>`
+     |
+8525 |     pub __obj_: std::mem::ManuallyDrop<_Tp>,
+     |                 +++++++++++++++++++++++   +
+
+error[E0107]: missing generics for type alias `std___1___forward_list_node_value_type`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13670:60
+      |
+13670 | ...type = std___1___forward_list_node_value_type;
+      |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected 1 generic argument
+      |
+note: type alias defined here, with 1 generic parameter: `_Tp`
+     --> /Users/stephen/dev/omt-encode/rust_port/target/debug/build/libvmx-sys-482f070b07f8e1e8/out/bindings.rs:13693:10
+      |
+13693 | pub type std___1___forward_list_node_value_type<_Tp> = _Tp;
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ---
+help: add missing generic argument
+      |
+13670 | pub type std___1___forward_node_traits___node_value_type = std___1___forward_list_node_value_type<_Tp>;
+      |                                                                                                  +++++
+
+Some errors have detailed explanations: E0107, E0206, E0425, E0428, E0740.
+For more information about an error, try `rustc --explain E0107`.
+warning: libvmx-sys@0.1.0: TARGET_ARCH=aarch64
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:531:13: warning: comparison of integers of different signs: 'uint32_t' (aka 'unsigned int') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:   531 |                                 if (len > d.MaxStreamLength) return VMX_ERR_BUFFER_OVERFLOW;
+warning: libvmx-sys@0.1.0:       |                                     ~~~ ^ ~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:546:14: warning: comparison of integers of different signs: 'uint32_t' (aka 'unsigned int') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:   546 |                                         if (len > d.MaxStreamLength) return VMX_ERR_BUFFER_OVERFLOW;
+warning: libvmx-sys@0.1.0:       |                                             ~~~ ^ ~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:36: warning: unused parameter 'instance' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                    ^
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:54: warning: unused parameter 'src' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                                      ^
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec.cpp:1824:67: warning: unused parameter 'dst' [-Wunused-parameter]
+warning: libvmx-sys@0.1.0:  1824 | VMX_API int VMX_Test(VMX_INSTANCE* instance, short * src, short * dst)
+warning: libvmx-sys@0.1.0:       |                                                                   ^
+warning: libvmx-sys@0.1.0: 5 warnings generated.
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1604:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1604 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1606:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1606 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1631:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1631 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1632:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1632 |         FLUSHREMAININGREADBITS(dataAC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1725:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1725 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1727:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1727 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1753:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1753 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1754:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1754 |         FLUSHREMAININGREADBITS(dataAC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1795:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1795 |                                 GETZEROS(dataDC, bc);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:483:9: note: expanded from macro 'GETZEROS'
+warning: libvmx-sys@0.1.0:   483 |         if (nz >= data.BitsLeft) { \
+warning: libvmx-sys@0.1.0:       |             ~~ ^  ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1797:5: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1797 |                                 GETBITS(dataDC, bc, val);
+warning: libvmx-sys@0.1.0:       |                                 ^~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:1814:2: warning: comparison of integers of different signs: 'buffer_t' (aka 'unsigned long long') and 'int' [-Wsign-compare]
+warning: libvmx-sys@0.1.0:  1814 |         FLUSHREMAININGREADBITS(dataDC);
+warning: libvmx-sys@0.1.0:       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:542:3: note: expanded from macro 'FLUSHREMAININGREADBITS'
+warning: libvmx-sys@0.1.0:   542 |                 GETBITS(data, r, n); \
+warning: libvmx-sys@0.1.0:       |                 ^~~~~~~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_common.h:506:9: note: expanded from macro 'GETBITS'
+warning: libvmx-sys@0.1.0:   506 |                 if (b > data.BitsLeft) \
+warning: libvmx-sys@0.1.0:       |                     ~ ^ ~~~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:2031:8: warning: unused variable 'pSrc' [-Wunused-variable]
+warning: libvmx-sys@0.1.0:  2031 |         BYTE* pSrc = alignedSrc;
+warning: libvmx-sys@0.1.0:       |               ^~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/vmxcodec_arm.cpp:2150:8: warning: unused variable 'pDst' [-Wunused-variable]
+warning: libvmx-sys@0.1.0:  2150 |         BYTE* pDst = alignedDst;
+warning: libvmx-sys@0.1.0:       |               ^~~~
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec_arm.cpp:26:
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec_arm.h:26:
+warning: libvmx-sys@0.1.0: In file included from ../../libvmx/src/vmxcodec.h:29:
+warning: libvmx-sys@0.1.0: ../../libvmx/src/thread_tasks.h:106:21: warning: unused function 'CreateTasks' [-Wunused-function]
+warning: libvmx-sys@0.1.0:   106 | static ThreadTasks* CreateTasks(int numThreads)
+warning: libvmx-sys@0.1.0:       |                     ^~~~~~~~~~~
+warning: libvmx-sys@0.1.0: ../../libvmx/src/thread_tasks.h:120:13: warning: unused function 'DestroyTasks' [-Wunused-function]
+warning: libvmx-sys@0.1.0:   120 | static void DestroyTasks(ThreadTasks* tasks)
+warning: libvmx-sys@0.1.0:       |             ^~~~~~~~~~~~
+warning: libvmx-sys@0.1.0: 15 warnings generated.
+error: could not compile `libvmx-sys` (lib) due to 27 previous errors

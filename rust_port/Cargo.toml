@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "omtcapture",
+    "libomtnet",
+    "libvmx-sys"
+]
+resolver = "2"

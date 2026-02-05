@@ -1,0 +1,168 @@
+    Checking libomtnet v0.1.0 (/Users/stephen/dev/omt-encode/rust_port/libomtnet)
+error: cannot find derive macro `Serialize` in this scope
+ --> libomtnet/src/enums.rs:4:45
+  |
+4 | #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deseri...
+  |                                             ^^^^^^^^^
+  |
+note: `Serialize` is imported here, but it is only a trait, without a derive macro
+ --> libomtnet/src/enums.rs:1:26
+  |
+1 | use serde::{Deserialize, Serialize};
+  |                          ^^^^^^^^^
+
+error: cannot find derive macro `Deserialize` in this scope
+ --> libomtnet/src/enums.rs:4:56
+  |
+4 | ...tialEq, Eq, Serialize, Deserialize)]
+  |                           ^^^^^^^^^^^
+  |
+note: `Deserialize` is imported here, but it is only a trait, without a derive macro
+ --> libomtnet/src/enums.rs:1:13
+  |
+1 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^
+
+error: cannot find derive macro `Serialize` in this scope
+  --> libomtnet/src/enums.rs:30:45
+   |
+30 | #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deser...
+   |                                             ^^^^^^^^^
+   |
+note: `Serialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:26
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |                          ^^^^^^^^^
+
+error: cannot find derive macro `Deserialize` in this scope
+  --> libomtnet/src/enums.rs:30:56
+   |
+30 | ...tialEq, Eq, Serialize, Deserialize)]
+   |                           ^^^^^^^^^^^
+   |
+note: `Deserialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:13
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |             ^^^^^^^^^^^
+
+error: cannot find derive macro `Serialize` in this scope
+  --> libomtnet/src/enums.rs:44:45
+   |
+44 | #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deser...
+   |                                             ^^^^^^^^^
+   |
+note: `Serialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:26
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |                          ^^^^^^^^^
+
+error: cannot find derive macro `Deserialize` in this scope
+  --> libomtnet/src/enums.rs:44:56
+   |
+44 | ...tialEq, Eq, Serialize, Deserialize)]
+   |                           ^^^^^^^^^^^
+   |
+note: `Deserialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:13
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |             ^^^^^^^^^^^
+
+error: cannot find derive macro `Serialize` in this scope
+  --> libomtnet/src/enums.rs:52:45
+   |
+52 | #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deser...
+   |                                             ^^^^^^^^^
+   |
+note: `Serialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:26
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |                          ^^^^^^^^^
+
+error: cannot find derive macro `Deserialize` in this scope
+  --> libomtnet/src/enums.rs:52:56
+   |
+52 | ...tialEq, Eq, Serialize, Deserialize)]
+   |                           ^^^^^^^^^^^
+   |
+note: `Deserialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:13
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |             ^^^^^^^^^^^
+
+error: cannot find derive macro `Serialize` in this scope
+  --> libomtnet/src/enums.rs:61:45
+   |
+61 | #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deser...
+   |                                             ^^^^^^^^^
+   |
+note: `Serialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:26
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |                          ^^^^^^^^^
+
+error: cannot find derive macro `Deserialize` in this scope
+  --> libomtnet/src/enums.rs:61:56
+   |
+61 | ...tialEq, Eq, Serialize, Deserialize)]
+   |                           ^^^^^^^^^^^
+   |
+note: `Deserialize` is imported here, but it is only a trait, without a derive macro
+  --> libomtnet/src/enums.rs:1:13
+   |
+ 1 | use serde::{Deserialize, Serialize};
+   |             ^^^^^^^^^^^
+
+warning: variant `iOS` should have an upper camel case name
+  --> libomtnet/src/enums.rs:58:5
+   |
+58 |     iOS = 4,
+   |     ^^^ help: convert the identifier to upper camel case (notice the capitalization): `IOs`
+   |
+   = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: unused import: `BytesMut`
+ --> libomtnet/src/frame.rs:1:33
+  |
+1 | use bytes::{Buf, BufMut, Bytes, BytesMut};
+  |                                 ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `OMTCodec`, `OMTColorSpace`, and `OMTVideoFlags`
+ --> libomtnet/src/frame.rs:2:34
+  |
+2 | ...rameType, OMTCodec, OMTVideoFlags, OMTColorSpace};
+  |              ^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused import: `tokio::sync::mpsc`
+ --> libomtnet/src/channel.rs:6:5
+  |
+6 | use tokio::sync::mpsc;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: value assigned to `total_size` is never read
+  --> libomtnet/src/codec.rs:29:30
+   |
+29 |         let mut total_size = OMTFrameHeader::SIZE;
+   |                              ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `total_size` is never read
+  --> libomtnet/src/codec.rs:37:9
+   |
+37 |         total_size += extended_header_size;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+
+warning: `libomtnet` (lib) generated 6 warnings
+error: could not compile `libomtnet` (lib) due to 10 previous errors; 6 warnings emitted
