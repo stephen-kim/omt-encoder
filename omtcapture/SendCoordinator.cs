@@ -48,7 +48,9 @@ namespace omtcapture
         private int _videoSendZero;
         private DateTime _lastLog = DateTime.MinValue;
 
-        public SendCoordinator(OMTSend send, int audioQueueCapacity = 4, int videoQueueCapacity = 2)
+        private static readonly double TimestampTo100Ns = 10_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        public SendCoordinator(OMTSend send, int audioQueueCapacity = 2, int videoQueueCapacity = 1)
         {
             _send = send;
             _audioQueue = new BlockingCollection<SendItem>(audioQueueCapacity);
@@ -96,9 +98,17 @@ namespace omtcapture
             SendItem item = new SendItem(template, payload);
             if (!_videoQueue.TryAdd(item))
             {
-                item.Dispose();
-                _videoDropped++;
-                return false;
+                if (_videoQueue.TryTake(out SendItem? dropped))
+                {
+                    dropped.Dispose();
+                    _videoDropped++;
+                }
+                if (!_videoQueue.TryAdd(item))
+                {
+                    item.Dispose();
+                    _videoDropped++;
+                    return false;
+                }
             }
             return true;
         }
@@ -138,6 +148,7 @@ namespace omtcapture
 
         private void SendItemNow(SendItem item, bool isAudio)
         {
+            item.Frame.Timestamp = GetMonotonicTimestamp100ns();
             int sent = _send.Send(item.Frame);
             if (sent == 0)
             {
@@ -153,6 +164,11 @@ namespace omtcapture
 
             item.Dispose();
             LogStats();
+        }
+
+        private static long GetMonotonicTimestamp100ns()
+        {
+            return (long)(System.Diagnostics.Stopwatch.GetTimestamp() * TimestampTo100Ns);
         }
 
         private void LogStats()
