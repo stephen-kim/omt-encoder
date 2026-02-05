@@ -48,8 +48,6 @@ namespace omtcapture
         private int _videoSendZero;
         private DateTime _lastLog = DateTime.MinValue;
 
-        private static readonly double TimestampTo100Ns = 10_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
-
         public SendCoordinator(OMTSend send, int audioQueueCapacity = 2, int videoQueueCapacity = 1)
         {
             _send = send;
@@ -148,7 +146,8 @@ namespace omtcapture
 
         private void SendItemNow(SendItem item, bool isAudio)
         {
-            item.Frame.Timestamp = GetMonotonicTimestamp100ns();
+            // Force zero timestamps to avoid receiver-side buffering based on timestamps.
+            item.Frame.Timestamp = 0;
             int sent = _send.Send(item.Frame);
             if (sent == 0)
             {
@@ -166,10 +165,6 @@ namespace omtcapture
             LogStats();
         }
 
-        private static long GetMonotonicTimestamp100ns()
-        {
-            return (long)(System.Diagnostics.Stopwatch.GetTimestamp() * TimestampTo100Ns);
-        }
 
         private void LogStats()
         {
