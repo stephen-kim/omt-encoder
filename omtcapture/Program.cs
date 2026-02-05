@@ -235,6 +235,22 @@ namespace omtcapture
             target.Monitor.Enabled = source.Monitor.Enabled;
             target.Monitor.Device = source.Monitor.Device;
             target.Monitor.Gain = source.Monitor.Gain;
+
+            // Normalize device selection to avoid stale devices when mode changes.
+            string mode = target.Mode.Trim().ToLowerInvariant();
+            if (mode == "hdmi")
+            {
+                target.TrsDevice = string.Empty;
+            }
+            else if (mode == "trs")
+            {
+                target.HdmiDevice = string.Empty;
+            }
+            else if (mode == "none")
+            {
+                target.HdmiDevice = string.Empty;
+                target.TrsDevice = string.Empty;
+            }
         }
 
         private static void CopyPreview(PreviewSettings target, PreviewSettings source)

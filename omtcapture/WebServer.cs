@@ -796,9 +796,12 @@ async function saveConfig() {
   const selectedInputs = getAudioInputSelection().slice(0, 2);
   if (selectedInputs.length === 0) {
     payload.audio.mode = 'none';
+    payload.audio.hdmiDevice = '';
+    payload.audio.trsDevice = '';
   } else if (selectedInputs.length === 1) {
     payload.audio.mode = 'hdmi';
     payload.audio.hdmiDevice = selectedInputs[0];
+    payload.audio.trsDevice = '';
   } else {
     payload.audio.mode = 'both';
     payload.audio.hdmiDevice = selectedInputs[0];
