@@ -10,8 +10,7 @@ namespace omtcapture
 {
     internal sealed class AudioPipeline : IDisposable
     {
-        private readonly object _sendLock;
-        private readonly OMTSend _send;
+        private readonly SendCoordinator _coordinator;
         private readonly AudioSettings _settings;
         private readonly CancellationTokenSource _cts = new();
         private Thread? _thread;
@@ -43,8 +42,6 @@ namespace omtcapture
         private bool _hasLastMix;
         private long _audioPtsBase;
         private long _audioSamplesSent;
-        private static int _audioSending;
-        internal static bool IsAudioSending => Interlocked.CompareExchange(ref _audioSending, 0, 0) == 1;
         // Audio queue disabled (direct send) to avoid added latency/instability.
         private bool _running;
         private DateTime _lastLogTime = DateTime.MinValue;
@@ -59,10 +56,9 @@ namespace omtcapture
         private bool _expectTrs;
 
 
-        public AudioPipeline(OMTSend send, object sendLock, AudioSettings settings)
+        public AudioPipeline(SendCoordinator coordinator, AudioSettings settings)
         {
-            _send = send;
-            _sendLock = sendLock;
+            _coordinator = coordinator;
             _settings = settings;
         }
 
@@ -993,41 +989,9 @@ namespace omtcapture
             byte[] payload = new byte[byteCount];
             Buffer.BlockCopy(_planarBuffer, 0, payload, 0, byteCount);
 
-            GCHandle handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
-            try
-            {
-                long timestamp = _audioPtsBase + (long)(_audioSamplesSent * 10_000_000.0 / sampleRate);
-                _audioSamplesSent += samplesPerChannel;
-                OMTMediaFrame audioFrame = new OMTMediaFrame
-                {
-                    Type = OMTFrameType.Audio,
-                    Codec = (int)OMTCodec.FPA1,
-                    SampleRate = sampleRate,
-                    Channels = channels,
-                    SamplesPerChannel = samplesPerChannel,
-                    Data = handle.AddrOfPinnedObject(),
-                    DataLength = payload.Length,
-                    Timestamp = timestamp
-                };
-
-                long waitStart = Stopwatch.GetTimestamp();
-                Interlocked.Exchange(ref _audioSending, 1);
-                lock (_sendLock)
-                {
-                    long waitedTicks = Stopwatch.GetTimestamp() - waitStart;
-                    if (waitedTicks > Stopwatch.Frequency / 200) // >5ms
-                    {
-                        double waitedMs = waitedTicks * 1000.0 / Stopwatch.Frequency;
-                        Console.WriteLine($"Audio send waited {waitedMs:F2}ms for send lock.");
-                    }
-                    _send.Send(audioFrame);
-                }
-                Interlocked.Exchange(ref _audioSending, 0);
-            }
-            finally
-            {
-                handle.Free();
-            }
+            long timestamp = _audioPtsBase + (long)(_audioSamplesSent * 10_000_000.0 / sampleRate);
+            _audioSamplesSent += samplesPerChannel;
+            _coordinator.EnqueueAudio(payload, sampleRate, channels, samplesPerChannel, timestamp);
         }
 
         private void LogAudioLevelsNew(bool hasHdmi, bool hasTrs, int frames)

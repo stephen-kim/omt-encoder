@@ -10,8 +10,7 @@ namespace omtcapture
 {
     internal sealed class VideoPipeline : IDisposable
     {
-        private readonly OMTSend _send;
-        private readonly object _sendLock;
+        private readonly SendCoordinator _coordinator;
         private readonly object _settingsLock = new();
         private CancellationTokenSource? _cts;
         private Thread? _thread;
@@ -23,10 +22,9 @@ namespace omtcapture
         private volatile bool _previewRestartRequested;
         private static readonly double TimestampTo100Ns = 10_000_000.0 / Stopwatch.Frequency;
 
-        public VideoPipeline(OMTSend send, object sendLock, VideoSettings settings)
+        public VideoPipeline(SendCoordinator coordinator, VideoSettings settings)
         {
-            _send = send;
-            _sendLock = sendLock;
+            _coordinator = coordinator;
             _settings = Clone(settings);
         }
 
@@ -275,38 +273,13 @@ namespace omtcapture
                         frame.Timestamp = GetMonotonicTimestamp100ns();
                     }
 
-                    int networkSend;
-                    bool sent = false;
-                    if (AudioPipeline.IsAudioSending)
-                    {
-                        continue;
-                    }
-
-                    if (Monitor.TryEnter(_sendLock))
-                    {
-                        try
-                        {
-                            networkSend = _send.Send(frame);
-                            sent = true;
-                        }
-                        finally
-                        {
-                            Monitor.Exit(_sendLock);
-                        }
-                    }
-                    else
-                    {
-                        networkSend = 0;
-                    }
-
-                    if (!sent)
-                    {
-                        continue;
-                    }
+                    byte[] payload = new byte[frame.DataLength];
+                    System.Runtime.InteropServices.Marshal.Copy(frame.Data, payload, 0, frame.DataLength);
+                    _coordinator.EnqueueVideo(payload, frame.Width, frame.Height, frame.Stride, frame.Codec, frame.FrameRateN, frame.FrameRateD, frame.Timestamp);
 
                     fpsWindowFrames++;
                     frameCount += 1;
-                    sentLength += networkSend;
+                    sentLength += frame.DataLength;
                     if (frameCount >= 60)
                     {
                         Console.WriteLine("Sent " + frameCount + " frames, " + sentLength + " bytes.");
