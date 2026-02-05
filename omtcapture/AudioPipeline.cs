@@ -1024,10 +1024,21 @@ namespace omtcapture
                     Timestamp = timestamp
                 };
 
-                int sentBytes;
-                lock (_sendLock)
+                int sentBytes = 0;
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    sentBytes = _send.Send(audioFrame);
+                    lock (_sendLock)
+                    {
+                        sentBytes = _send.Send(audioFrame);
+                    }
+                    if (sentBytes > 0)
+                    {
+                        break;
+                    }
+                    if (attempt == 0)
+                    {
+                        Thread.Sleep(1);
+                    }
                 }
                 if (sentBytes == 0)
                 {
