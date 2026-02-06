@@ -63,10 +63,24 @@ mod stub {
 mod linux {
     use super::*;
     use libomtnet::{OMTCodec, OMTFrame, OMTFrameType, OMTVideoHeader};
+    use libvmx_sys::root::{
+        VMX_INSTANCE,
+        VMX_SIZE,
+        VMX_Create,
+        VMX_Destroy,
+        VMX_EncodeUYVY,
+        VMX_EncodeYUY2,
+        VMX_SaveTo,
+        VMX_PROFILE_VMX_PROFILE_DEFAULT,
+        VMX_COLORSPACE_VMX_COLORSPACE_BT709,
+        VMX_ERR_VMX_ERR_INVALID_CODEC_FORMAT,
+        VMX_ERR_VMX_ERR_OK,
+    };
     use v4l::prelude::*;
     use v4l::format::FourCC;
     use v4l::buffer::Type;
-    use v4l::io::traits::CaptureConfigurable;
+    use v4l::io::traits::CaptureStream;
+    use v4l::video::Capture;
     use std::io::Write;
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::time::Instant;
@@ -102,7 +116,12 @@ mod linux {
         let mut fmt = dev.format().unwrap();
         fmt.width = settings.width;
         fmt.height = settings.height;
-        fmt.fourcc = FourCC::new(settings.codec.as_bytes());
+        let mut codec_bytes = *b"YUYV";
+        let codec_src = settings.codec.as_bytes();
+        if codec_src.len() >= 4 {
+            codec_bytes.copy_from_slice(&codec_src[0..4]);
+        }
+        fmt.fourcc = FourCC::new(&codec_bytes);
         if let Err(e) = dev.set_format(&fmt) {
             eprintln!("Failed to set video format: {}", e);
         }
@@ -121,17 +140,17 @@ mod linux {
         };
 
         // Initialize libvmx if not using native format
-        let mut vmx_instance: Option<*mut libvmx_sys::VMX_INSTANCE> = None;
+        let mut vmx_instance: Option<*mut VMX_INSTANCE> = None;
         if !settings.use_native_format {
             unsafe {
-                let size = libvmx_sys::VMX_SIZE {
+                let size = VMX_SIZE {
                     width: settings.width as i32,
                     height: settings.height as i32,
                 };
-                vmx_instance = Some(libvmx_sys::VMX_Create(
+                vmx_instance = Some(VMX_Create(
                     size,
-                    libvmx_sys::VMX_PROFILE_VMX_PROFILE_DEFAULT,
-                    libvmx_sys::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
+                    VMX_PROFILE_VMX_PROFILE_DEFAULT,
+                    VMX_COLORSPACE_VMX_COLORSPACE_BT709,
                 ));
                 println!("libvmx encoder initialized.");
             }
@@ -172,13 +191,13 @@ mod linux {
                 unsafe {
                     let stride = (settings.width * 2) as i32;
                     let err = match &settings.codec as &str {
-                        "UYVY" => libvmx_sys::VMX_EncodeUYVY(inst, raw_data.as_ptr() as *mut _, stride, 0),
-                        "YUY2" => libvmx_sys::VMX_EncodeYUY2(inst, raw_data.as_ptr() as *mut _, stride, 0),
-                        _ => libvmx_sys::VMX_ERR_VMX_ERR_INVALID_CODEC_FORMAT,
+                        "UYVY" => VMX_EncodeUYVY(inst, raw_data.as_ptr() as *mut _, stride, 0),
+                        "YUY2" => VMX_EncodeYUY2(inst, raw_data.as_ptr() as *mut _, stride, 0),
+                        _ => VMX_ERR_VMX_ERR_INVALID_CODEC_FORMAT,
                     };
 
-                    if err == libvmx_sys::VMX_ERR_VMX_ERR_OK {
-                        let compressed_len = libvmx_sys::VMX_SaveTo(inst, compress_buffer.as_mut_ptr(), compress_buffer.len() as i32);
+                    if err == VMX_ERR_VMX_ERR_OK {
+                        let compressed_len = VMX_SaveTo(inst, compress_buffer.as_mut_ptr(), compress_buffer.len() as i32);
                         if compressed_len > 0 {
                             final_data = bytes::Bytes::copy_from_slice(&compress_buffer[..compressed_len as usize]);
                             codec = OMTCodec::VMX1 as i32;
@@ -234,7 +253,7 @@ mod linux {
         // Cleanup
         if let Some(inst) = vmx_instance {
             unsafe {
-                libvmx_sys::VMX_Destroy(inst);
+                VMX_Destroy(inst);
             }
         }
     }
@@ -273,12 +292,12 @@ mod linux {
 
         for output in outputs {
             let mut cmd = Command::new("ffmpeg");
-        let input_rate = if settings.frame_rate_d == 0 {
+            let input_rate = if settings.frame_rate_d == 0 {
             "30".to_string()
         } else {
             format!("{}/{}", settings.frame_rate_n, settings.frame_rate_d)
         };
-        cmd.args([
+            cmd.args([
             "-loglevel", "error",
                 "-f", "rawvideo",
                 "-pix_fmt", pix_fmt,

@@ -66,8 +66,7 @@ mod stub {
 mod linux {
     use super::*;
     use alsa::{Direction, ValueOr};
-    use alsa::pcm::{PCM, HwParams, Format, Access, State};
-    use std::ffi::CString;
+    use alsa::pcm::{PCM, HwParams, Format, Access};
     use bytes::BufMut;
     use libomtnet::{OMTFrame, OMTFrameType};
 
@@ -219,10 +218,10 @@ mod linux {
         hwp.set_format(Format::float())?; // Try float first
         hwp.set_access(Access::RWInterleaved)?;
         if buffer_usec > 0 {
-            let _ = hwp.set_buffer_time(buffer_usec, ValueOr::Nearest);
+            let _ = hwp.set_buffer_time_near(buffer_usec, ValueOr::Nearest);
         }
         if period_usec > 0 {
-            let _ = hwp.set_period_time(period_usec, ValueOr::Nearest);
+            let _ = hwp.set_period_time_near(period_usec, ValueOr::Nearest);
         }
         
         pcm.hw_params(&hwp)?;
@@ -237,10 +236,10 @@ mod linux {
         hwp.set_format(Format::float())?;
         hwp.set_access(Access::RWInterleaved)?;
         if buffer_usec > 0 {
-            let _ = hwp.set_buffer_time(buffer_usec, ValueOr::Nearest);
+            let _ = hwp.set_buffer_time_near(buffer_usec, ValueOr::Nearest);
         }
         if period_usec > 0 {
-            let _ = hwp.set_period_time(period_usec, ValueOr::Nearest);
+            let _ = hwp.set_period_time_near(period_usec, ValueOr::Nearest);
         }
         pcm.hw_params(&hwp)?;
         Ok(pcm)
