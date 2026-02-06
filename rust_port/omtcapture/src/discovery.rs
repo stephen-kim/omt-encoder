@@ -8,7 +8,7 @@ pub struct MdnsPublisher {
 impl MdnsPublisher {
     pub fn start(source_name: &str, port: u16) -> Option<Self> {
         let hostname = read_hostname().unwrap_or_else(|| "omtcapture".to_string());
-        let instance = format!("{} ({})", hostname, source_name);
+        let instance = build_instance_name(&hostname, source_name);
 
         let mut cmd = Command::new("avahi-publish-service");
         cmd.arg(&instance)
@@ -52,4 +52,24 @@ fn read_hostname() -> Option<String> {
         }
     }
     None
+}
+
+fn build_instance_name(hostname: &str, source_name: &str) -> String {
+    // Match libomtnet OMTAddress length limit (63 chars) for the full name:
+    // "HOSTNAME (Source Name)"
+    const MAX_FULLNAME_LENGTH: usize = 63;
+
+    let mut name = source_name.to_string();
+    let mut full = format!("{} ({})", hostname, name);
+    let full_len = full.chars().count();
+    if full_len > MAX_FULLNAME_LENGTH {
+        let oversize = full_len - MAX_FULLNAME_LENGTH;
+        let name_len = name.chars().count();
+        if oversize < name_len {
+            let new_len = name_len - oversize;
+            name = name.chars().take(new_len).collect::<String>().trim_end().to_string();
+            full = format!("{} ({})", hostname, name);
+        }
+    }
+    full
 }
