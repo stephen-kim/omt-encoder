@@ -3,6 +3,7 @@ mod video_pipeline;
 mod settings;
 mod web_server;
 mod send_coordinator;
+mod discovery;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -51,6 +52,8 @@ async fn main() -> Result<()> {
     audio.start();
     let mut video = VideoPipeline::new(initial_settings.video.clone(), initial_settings.preview.clone(), send.clone());
     video.start();
+
+    let _mdns_publisher = discovery::MdnsPublisher::start(&initial_settings.video.name, 6400);
     let pipelines = Arc::new(Mutex::new(RuntimePipelines {
         audio,
         video,
