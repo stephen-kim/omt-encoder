@@ -175,19 +175,19 @@ fn extract_metadata_xml(frame: &OMTFrame) -> Option<String> {
 }
 
 fn parse_bool_attr(xml: &str, name: &str) -> Option<bool> {
-    let needle = format!(\"{}=\", name);
+    let needle = format!("{}=", name);
     let idx = xml.find(&needle)?;
     let rest = &xml[idx + needle.len()..];
     let quote = rest.chars().next()?;
-    if quote != '\"' && quote != '\\'' {
+    if quote != '"' && quote != '\'' {
         return None;
     }
     let rest = &rest[1..];
     let end = rest.find(quote)?;
     let value = rest[..end].trim().to_lowercase();
     match value.as_str() {
-        \"true\" => Some(true),
-        \"false\" => Some(false),
+        "true" => Some(true),
+        "false" => Some(false),
         _ => None,
     }
 }
