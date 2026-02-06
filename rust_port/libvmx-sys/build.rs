@@ -34,7 +34,11 @@ fn main() {
         //.file(root_dir.join("pch.cpp")) // Usually not needed if not using PCH in gcc/clang
         //.file(root_dir.join("dllmain.cpp")) // Windows specific usually
         .std("c++17") // Assuming C++17 or similar
-        .flag("-fms-extensions"); // Allow __declspec attributes in C++ code
+        .flag("-fms-extensions") // Allow __declspec attributes in C++ code
+        .flag("-Wno-strict-aliasing")
+        .flag("-Wno-unused-variable")
+        .flag("-Wno-unused-function")
+        .flag("-Wno-sign-compare");
 
     // Architecture specific flags and files
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();

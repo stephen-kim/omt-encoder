@@ -225,6 +225,7 @@ mod linux {
         }
         
         pcm.hw_params(&hwp)?;
+        drop(hwp);
         Ok(pcm)
     }
 
@@ -242,6 +243,7 @@ mod linux {
             let _ = hwp.set_period_time_near(period_usec, ValueOr::Nearest);
         }
         pcm.hw_params(&hwp)?;
+        drop(hwp);
         Ok(pcm)
     }
 
