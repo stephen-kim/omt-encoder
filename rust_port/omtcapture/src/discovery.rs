@@ -39,16 +39,19 @@ impl Drop for MdnsPublisher {
 }
 
 fn read_hostname() -> Option<String> {
-    if let Ok(value) = std::env::var("HOSTNAME") {
-        let trimmed = value.trim().to_string();
-        if !trimmed.is_empty() {
-            return Some(trimmed);
-        }
-    }
     if let Ok(raw) = fs::read_to_string("/etc/hostname") {
         let trimmed = raw.trim().to_string();
         if !trimmed.is_empty() {
             return Some(trimmed);
+        }
+    }
+    if let Ok(out) = Command::new("uname").arg("-n").output() {
+        if out.status.success() {
+            let value = String::from_utf8_lossy(&out.stdout);
+            let trimmed = value.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
         }
     }
     None
