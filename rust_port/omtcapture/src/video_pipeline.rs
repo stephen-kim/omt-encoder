@@ -112,20 +112,28 @@ mod linux {
             }
         };
 
-        // Set format
-        let mut fmt = dev.format().unwrap();
-        fmt.width = settings.width;
-        fmt.height = settings.height;
-        let mut codec_bytes = *b"YUYV";
-        let codec_src = settings.codec.as_bytes();
-        if codec_src.len() >= 4 {
-            codec_bytes.copy_from_slice(&codec_src[0..4]);
+        let mut fmt = match dev.format() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to read device format: {}", e);
+                return;
+            }
+        };
+
+        if !settings.use_native_format {
+            fmt.width = settings.width;
+            fmt.height = settings.height;
+            let mut codec_bytes = *b"YUYV";
+            let codec_src = settings.codec.as_bytes();
+            if codec_src.len() >= 4 {
+                codec_bytes.copy_from_slice(&codec_src[0..4]);
+            }
+            fmt.fourcc = FourCC::new(&codec_bytes);
+            if let Err(e) = dev.set_format(&fmt) {
+                eprintln!("Failed to set video format: {}", e);
+            }
+            fmt = dev.format().unwrap_or(fmt);
         }
-        fmt.fourcc = FourCC::new(&codec_bytes);
-        if let Err(e) = dev.set_format(&fmt) {
-            eprintln!("Failed to set video format: {}", e);
-        }
-        let fmt = dev.format().unwrap_or(fmt);
         let input_width = fmt.width;
         let input_height = fmt.height;
         let input_fourcc = fmt.fourcc;
@@ -144,8 +152,8 @@ mod linux {
         if !settings.use_native_format {
             unsafe {
                 let size = VMX_SIZE {
-                    width: settings.width as i32,
-                    height: settings.height as i32,
+                    width: fmt.width as i32,
+                    height: fmt.height as i32,
                 };
                 vmx_instance = Some(VMX_Create(
                     size,
@@ -156,7 +164,7 @@ mod linux {
             }
         }
 
-        let mut compress_buffer = vec![0u8; (settings.width * settings.height * 2) as usize];
+        let mut compress_buffer = vec![0u8; (fmt.width * fmt.height * 2) as usize];
 
         let mut preview_sinks = build_preview_sinks(&settings, &preview, input_width, input_height, input_fourcc);
 
@@ -178,18 +186,22 @@ mod linux {
                 .unwrap_or_default()
                 .as_nanos() as i64 / 100;
             
-            let mut codec = match &settings.codec as &str {
-                "UYVY" => OMTCodec::UYVY as i32,
-                "YUY2" => OMTCodec::YUY2 as i32,
-                "NV12" => OMTCodec::NV12 as i32,
-                _ => OMTCodec::UYVY as i32,
+            let mut codec = if settings.use_native_format {
+                fourcc_to_codec(input_fourcc) as i32
+            } else {
+                match &settings.codec as &str {
+                    "UYVY" => OMTCodec::UYVY as i32,
+                    "YUY2" => OMTCodec::YUY2 as i32,
+                    "NV12" => OMTCodec::NV12 as i32,
+                    _ => OMTCodec::UYVY as i32,
+                }
             };
 
             let final_data: bytes::Bytes;
 
             if let Some(inst) = vmx_instance {
                 unsafe {
-                    let stride = (settings.width * 2) as i32;
+                    let stride = (fmt.width * 2) as i32;
                     let err = match &settings.codec as &str {
                         "UYVY" => VMX_EncodeUYVY(inst, raw_data.as_ptr() as *mut _, stride, 0),
                         "YUY2" => VMX_EncodeYUY2(inst, raw_data.as_ptr() as *mut _, stride, 0),
@@ -277,7 +289,7 @@ mod linux {
         let fourcc_str = std::str::from_utf8(&input_fourcc.repr).unwrap_or("YUYV");
         let pix_fmt = match fourcc_str {
             "UYVY" => "uyvy422",
-            "YUY2" => "yuyv422",
+            "YUY2" | "YUYV" => "yuyv422",
             "NV12" => "nv12",
             _ => match settings.codec.as_str() {
                 "UYVY" => "uyvy422",
@@ -361,5 +373,17 @@ mod linux {
         sink.child = child;
         sink.last_sent = Instant::now();
         Ok(())
+    }
+
+    fn fourcc_to_codec(fourcc: FourCC) -> OMTCodec {
+        match std::str::from_utf8(&fourcc.repr).unwrap_or("YUYV") {
+            "UYVY" => OMTCodec::UYVY,
+            "YUYV" | "YUY2" => OMTCodec::YUY2,
+            "NV12" => OMTCodec::NV12,
+            "P216" => OMTCodec::P216,
+            "UYVA" => OMTCodec::UYVA,
+            "BGRA" => OMTCodec::BGRA,
+            _ => OMTCodec::UYVY,
+        }
     }
 }

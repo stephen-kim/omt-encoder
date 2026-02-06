@@ -128,6 +128,7 @@ pub struct OMTFrame {
     pub header: OMTFrameHeader,
     pub video_header: Option<OMTVideoHeader>,
     pub audio_header: Option<OMTAudioHeader>,
+    pub metadata: Bytes,
     pub data: Bytes, // The payload (metadata + actual data)
 }
 
@@ -140,6 +141,7 @@ impl OMTFrame {
             header,
             video_header: None,
             audio_header: None,
+            metadata: Bytes::new(),
             data: Bytes::new(),
         };
         frame.update_data_length();
@@ -153,7 +155,9 @@ impl OMTFrame {
         } else if self.header.frame_type == OMTFrameType::Audio {
             extended_len = OMTAudioHeader::SIZE;
         }
-        self.header.data_length = (self.data.len() + extended_len) as i32;
+        let metadata_len = self.metadata.len();
+        self.header.metadata_length = metadata_len.min(u16::MAX as usize) as u16;
+        self.header.data_length = (self.data.len() + metadata_len + extended_len) as i32;
     }
 }
 

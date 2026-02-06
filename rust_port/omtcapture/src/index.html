@@ -146,6 +146,40 @@ input:focus, select:focus, textarea:focus {
 
 input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-2); }
 
+.is-disabled {
+  opacity: 0.3;
+  filter: grayscale(0.8);
+  pointer-events: none;
+  position: relative;
+}
+
+.is-disabled .help {
+  color: rgba(154, 164, 178, 0.45);
+}
+
+.is-disabled input,
+.is-disabled select,
+.is-disabled textarea {
+  background: #070c12;
+  border-color: #16202b;
+  box-shadow: none;
+}
+
+.native-lock {
+  display: none;
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(86, 212, 255, 0.08);
+  border: 1px dashed rgba(86, 212, 255, 0.35);
+  color: rgba(214, 241, 255, 0.9);
+  font-size: 13px;
+}
+
+.is-disabled .native-lock {
+  display: block;
+}
+
 button {
   margin-top: 14px;
   padding: 10px 16px;
@@ -159,6 +193,24 @@ button {
 }
 
 button:hover { transform: translateY(-1px); }
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-actions button {
+  margin-top: 0;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
 
 pre {
   background: #0b0f14;
@@ -202,6 +254,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
 }
 
 .fade-in { animation: fadeIn 320ms ease-out; }
+.hidden { display: none !important; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -218,8 +271,12 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <p class="sub">Low-latency ingest, transport, and monitoring controls.</p>
     </div>
     <div>
-      <div id="status" class="status-pill">Loading…</div>
+      <div id="status" class="status-pill hidden"></div>
       <div id="displayMode" class="meta"></div>
+      <div class="hero-actions">
+        <button id="saveButtonTop" onclick="saveConfig()">Save changes</button>
+        <button class="ghost" onclick="loadDevices()">Refresh devices</button>
+      </div>
     </div>
   </header>
 
@@ -240,47 +297,50 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
       <div class="help">Bypass scaling and pixel conversion for lowest latency.</div>
 
-      <label>Resolution preset</label>
-      <select id="videoPreset" onchange="applyVideoPreset()">
-        <option value="custom">Custom</option>
-        <option value="hd-native">HD (1920x1080, YUY2)</option>
-        <option value="hd-nv12">HD (1920x1080, NV12)</option>
-        <option value="uhd-yuy2">UHD (3840x2160, YUY2)</option>
-        <option value="uhd-nv12">UHD (3840x2160, NV12)</option>
-      </select>
-      <div class="help">Choose a preset or dial in a custom format.</div>
+      <div id="videoTransformFields">
+        <div class="native-lock">Native input mode is enabled. Disable it to edit transforms.</div>
+        <label>Resolution preset</label>
+        <select id="videoPreset" onchange="applyVideoPreset()">
+          <option value="custom">Custom</option>
+          <option value="hd-native">HD (1920x1080, YUY2)</option>
+          <option value="hd-nv12">HD (1920x1080, NV12)</option>
+          <option value="uhd-yuy2">UHD (3840x2160, YUY2)</option>
+          <option value="uhd-nv12">UHD (3840x2160, NV12)</option>
+        </select>
+        <div class="help">Choose a preset or dial in a custom format.</div>
 
-      <div class="inline">
-        <div>
-          <label>Width</label>
-          <input id="videoWidth" type="number" />
+        <div class="inline">
+          <div>
+            <label>Width</label>
+            <input id="videoWidth" type="number" />
+          </div>
+          <div>
+            <label>Height</label>
+            <input id="videoHeight" type="number" />
+          </div>
         </div>
-        <div>
-          <label>Height</label>
-          <input id="videoHeight" type="number" />
+        <div class="help">Output resolution when not using native mode.</div>
+
+        <div class="inline">
+          <div>
+            <label>Frame rate numerator</label>
+            <input id="videoFrameRateN" type="number" />
+          </div>
+          <div>
+            <label>Frame rate denominator</label>
+            <input id="videoFrameRateD" type="number" />
+          </div>
         </div>
+        <div class="help">Example: 30000 / 1001 for 29.97 fps.</div>
+
+        <label>Codec</label>
+        <select id="videoCodec">
+          <option value="UYVY">UYVY</option>
+          <option value="YUY2">YUY2</option>
+          <option value="NV12">NV12</option>
+        </select>
+        <div class="help">Pixel format sent over OMT when not native.</div>
       </div>
-      <div class="help">Output resolution when not using native mode.</div>
-
-      <div class="inline">
-        <div>
-          <label>Frame rate numerator</label>
-          <input id="videoFrameRateN" type="number" />
-        </div>
-        <div>
-          <label>Frame rate denominator</label>
-          <input id="videoFrameRateD" type="number" />
-        </div>
-      </div>
-      <div class="help">Example: 30000 / 1001 for 29.97 fps.</div>
-
-      <label>Codec</label>
-      <select id="videoCodec">
-        <option value="UYVY">UYVY</option>
-        <option value="YUY2">YUY2</option>
-        <option value="NV12">NV12</option>
-      </select>
-      <div class="help">Pixel format sent over OMT when not native.</div>
     </div>
 
     <div class="card">
@@ -396,13 +456,11 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <label>Web port</label>
       <input id="webPort" type="number" />
       <div class="help">Requires service restart to apply.</div>
-      <button onclick="saveConfig()">Save changes</button>
       <small>Video changes apply without reboot. Web port changes require restart.</small>
     </div>
 
     <div class="card">
       <div class="card-title">Devices</div>
-      <button onclick="loadDevices()">Refresh</button>
       <div class="section-label">Audio inputs</div>
       <pre id="audioInputs"></pre>
       <div class="section-label">Audio outputs</div>
@@ -564,6 +622,10 @@ function toggleNativeInputs() {
     'videoFrameRateD',
     'videoCodec'
   ];
+  const section = document.getElementById('videoTransformFields');
+  if (section) {
+    section.classList.toggle('is-disabled', nativeOn);
+  }
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -688,6 +750,7 @@ async function loadConfig() {
   document.getElementById('sendForceZeroTimestamps').checked = data.send.force_zero_timestamps;
 
   document.getElementById('webPort').value = data.web.port;
+  document.getElementById('status').innerText = 'Ready';
 }
 
 async function saveConfig() {

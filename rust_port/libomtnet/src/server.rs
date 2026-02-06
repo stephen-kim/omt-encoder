@@ -1,9 +1,11 @@
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 use crate::frame::OMTFrame;
 use crate::channel::OMTChannel;
 use std::io;
 use futures::{SinkExt, StreamExt};
+use std::sync::Arc;
+use crate::enums::OMTFrameType;
 
 pub struct OMTServer {
     listener: TcpListener,
@@ -44,6 +46,25 @@ impl OMTServer {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SubscriptionState {
+    wants_video: bool,
+    wants_audio: bool,
+    wants_metadata: bool,
+    preview: bool,
+}
+
+impl Default for SubscriptionState {
+    fn default() -> Self {
+        SubscriptionState {
+            wants_video: true,
+            wants_audio: true,
+            wants_metadata: false,
+            preview: false,
+        }
+    }
+}
+
 async fn handle_connection(socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -> Result<(), io::Error> {
     // Configure socket buffers
     // Note: OMT logic sets specific buffer sizes
@@ -53,10 +74,24 @@ async fn handle_connection(socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -
     let mut rx = tx.subscribe();
 
     let (mut sink, mut stream) = channel.into_split();
+    let state = Arc::new(Mutex::new(SubscriptionState::default()));
 
     // Spawn send task (Broadcast -> TCP)
+    let send_state = Arc::clone(&state);
     let send_task = tokio::spawn(async move {
         while let Ok(frame) = rx.recv().await {
+            let allowed = {
+                let state = send_state.lock().await;
+                match frame.header.frame_type {
+                    OMTFrameType::Video => state.wants_video,
+                    OMTFrameType::Audio => state.wants_audio,
+                    OMTFrameType::Metadata => state.wants_metadata,
+                    _ => false,
+                }
+            };
+            if !allowed {
+                continue;
+            }
             if let Err(e) = sink.send(frame).await {
                 return Err(e);
             }
@@ -73,9 +108,7 @@ async fn handle_connection(socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -
     while let Some(result) = stream.next().await {
         match result {
             Ok(frame) => {
-                // Process incoming frame (e.g. metadata updates from client)
-                // For now, assume read-only/log
-                println!("Received frame type: {:?}", frame.header.frame_type);
+                handle_subscription_frame(&frame, &state).await;
             }
             Err(e) => {
                 return Err(e);
@@ -85,4 +118,76 @@ async fn handle_connection(socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -
 
     let _ = send_task.await;
     Ok(())
+}
+
+async fn handle_subscription_frame(frame: &OMTFrame, state: &Arc<Mutex<SubscriptionState>>) {
+    if let Some(xml) = extract_metadata_xml(frame) {
+        if xml.contains("<OMTSubscribe") {
+            let mut updated = false;
+            let mut state = state.lock().await;
+            if let Some(v) = parse_bool_attr(&xml, "Video") {
+                state.wants_video = v;
+                updated = true;
+            }
+            if let Some(v) = parse_bool_attr(&xml, "Audio") {
+                state.wants_audio = v;
+                updated = true;
+            }
+            if let Some(v) = parse_bool_attr(&xml, "Metadata") {
+                state.wants_metadata = v;
+                updated = true;
+            }
+            if updated {
+                println!(
+                    "Client subscriptions updated: video={}, audio={}, metadata={}",
+                    state.wants_video, state.wants_audio, state.wants_metadata
+                );
+            }
+        }
+        if xml.contains("<OMTSettings") {
+            if let Some(v) = parse_bool_attr(&xml, "Preview") {
+                let mut state = state.lock().await;
+                state.preview = v;
+                println!("Client preview setting: {}", state.preview);
+            }
+        }
+    }
+}
+
+fn extract_metadata_xml(frame: &OMTFrame) -> Option<String> {
+    let bytes = if !frame.metadata.is_empty() {
+        &frame.metadata
+    } else if !frame.data.is_empty() && frame.header.metadata_length == 0 {
+        &frame.data
+    } else {
+        return None;
+    };
+    if bytes.is_empty() {
+        return None;
+    }
+    let nul_pos = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+    let s = String::from_utf8_lossy(&bytes[..nul_pos]).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn parse_bool_attr(xml: &str, name: &str) -> Option<bool> {
+    let needle = format!(\"{}=\", name);
+    let idx = xml.find(&needle)?;
+    let rest = &xml[idx + needle.len()..];
+    let quote = rest.chars().next()?;
+    if quote != '\"' && quote != '\\'' {
+        return None;
+    }
+    let rest = &rest[1..];
+    let end = rest.find(quote)?;
+    let value = rest[..end].trim().to_lowercase();
+    match value.as_str() {
+        \"true\" => Some(true),
+        \"false\" => Some(false),
+        _ => None,
+    }
 }

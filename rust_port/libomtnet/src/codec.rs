@@ -45,7 +45,8 @@ impl Decoder for OMTFrameCodec {
             header: header.clone(),
             video_header: None,
             audio_header: None,
-            data: bytes::Bytes::new(), // Placeholder
+            metadata: bytes::Bytes::new(),
+            data: bytes::Bytes::new(),
         };
 
         // Read Extended Header
@@ -70,10 +71,17 @@ impl Decoder for OMTFrameCodec {
         // Read Data
         // Data len is header.data_length - extended_header_size
         let payload_len = header.data_length as usize - extended_header_size;
-        
+        let metadata_len = header.metadata_length as usize;
+
         if payload_len > 0 {
-            let data = src.split_to(payload_len).freeze();
-            frame.data = data;
+            let meta_len = metadata_len.min(payload_len);
+            if meta_len > 0 {
+                frame.metadata = src.split_to(meta_len).freeze();
+            }
+            let remaining = payload_len - meta_len;
+            if remaining > 0 {
+                frame.data = src.split_to(remaining).freeze();
+            }
         }
 
         Ok(Some(frame))
@@ -98,8 +106,13 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
             }
         }
 
-        // 3. Write Data
-        dst.extend_from_slice(&item.data);
+        // 3. Write Metadata + Data
+        if !item.metadata.is_empty() {
+            dst.extend_from_slice(&item.metadata);
+        }
+        if !item.data.is_empty() {
+            dst.extend_from_slice(&item.data);
+        }
         
         Ok(())
     }
