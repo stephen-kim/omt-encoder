@@ -71,7 +71,7 @@ ensure_cmdline_flags
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Rust toolchain not found. Installing via rustup..."
-  curl -sSf https://sh.rustup.rs | sh -s -- -y
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
