@@ -32,12 +32,33 @@
 #else
 #define VMX_API extern "C" __attribute__((visibility("default")))
 #endif
-#if defined(_M_ARM64) | defined(__arm64) | defined(__aarch64__)
+#if defined(_M_ARM64) || defined(__arm64) || defined(__aarch64__)
+#ifndef ARM64
 #define ARM64
 #endif
-#if defined(_M_X64) | defined(__x86_64__)
+#endif
+#if defined(_M_X64) || defined(__x86_64__)
+#ifndef X64
 #define X64
+#endif
 #define AVX2 //Include AVX2 in all Intel builds as these functions will be dynamically called only if instruction set available.
+#endif
+
+#ifdef _MSC_VER
+#define VMX_ALIGNATTR(n) __declspec(align(n))
+#else
+#define VMX_ALIGNATTR(n) __attribute__((aligned(n)))
+#endif
+
+#ifndef _MSC_VER
+#if defined(ARM64)
+#define __lzcnt64(t) __builtin_clzll(t)
+#define __lzcnt(t) __builtin_clz(t)
+#else
+// For x86_64 GCC/Clang, we still might need explicitly mapping if not using -mlzcnt
+#define __lzcnt64(t) __builtin_clzll(t)
+#define __lzcnt(t) __builtin_clz(t)
+#endif
 #endif
 
 const int VMX_SLICE_HEIGHT = 16;
@@ -129,9 +150,9 @@ struct VMX_SLICE_SET
 	VMX_SIZE PixelSize; //Size in pixels of the slice, for copying from source image data. Due to alignment last slice will be only 8 pixels height for 1080 for example.
 	VMX_SIZE PixelSizeInterlaced; //Same as above but for second field alignment adjustment at the mid point.
 	int LowerField; //=1 when this is a lower field slice
-	__declspec(align(64)) short TempBlock[128];
-	__declspec(align(64)) short TempBlock2[128];
-	__declspec(align(64)) short TempBlock3[128];
+	VMX_ALIGNATTR(64) short TempBlock[128];
+	VMX_ALIGNATTR(64) short TempBlock2[128];
+	VMX_ALIGNATTR(64) short TempBlock3[128];
 };
 
 struct VMX_PLANE

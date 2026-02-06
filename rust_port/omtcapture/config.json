@@ -1,0 +1,48 @@
+{
+  "video": {
+    "name": "Video",
+    "device_path": "/dev/video0",
+    "width": 1920,
+    "height": 1080,
+    "frame_rate_n": 30,
+    "frame_rate_d": 1,
+    "codec": "YUY2",
+    "use_native_format": true
+  },
+  "audio": {
+    "mode": "hdmi",
+    "hdmi_device": "hw:0,0",
+    "trs_device": "",
+    "sample_rate": 48000,
+    "channels": 2,
+    "samples_per_channel": 480,
+    "mix_gain": 1.0,
+    "arecord_buffer_usec": 100000,
+    "arecord_period_usec": 20000,
+    "restart_after_failed_reads": 5,
+    "restart_cooldown_ms": 1000,
+    "monitor": {
+      "enabled": true,
+      "device": "default",
+      "gain": 1.0
+    }
+  },
+  "send": {
+    "audio_queue_capacity": 8,
+    "video_queue_capacity": 1,
+    "force_zero_timestamps": true
+  },
+  "preview": {
+    "enabled": false,
+    "output_device": "/dev/fb0",
+    "output_devices": [],
+    "width": 320,
+    "height": 180,
+    "fps": 10,
+    "pixel_format": "rgb565le"
+  },
+  "web": {
+    "enabled": true,
+    "port": 8080
+  }
+}

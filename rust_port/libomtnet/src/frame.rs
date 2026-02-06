@@ -1,5 +1,5 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use crate::enums::{OMTFrameType, OMTCodec, OMTVideoFlags, OMTColorSpace};
+use bytes::{Buf, BufMut, Bytes};
+use crate::enums::OMTFrameType;
 use std::io;
 
 #[derive(Debug, Clone, Default)]
@@ -160,6 +160,8 @@ impl OMTFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::BytesMut;
+    use crate::enums::{OMTCodec, OMTVideoFlags, OMTColorSpace};
 
     #[test]
     fn test_header_serialization() {

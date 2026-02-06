@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use std::process::Command;
 use std::fs;
 use anyhow::Result;
+use tokio::sync::watch;
 use crate::settings::Settings;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ pub struct FramebufferInfoResponse {
 #[derive(Clone)]
 pub struct WebState {
     pub settings: Arc<RwLock<Settings>>,
+    pub settings_tx: watch::Sender<Settings>,
+    pub config_path: String,
 }
 
 pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
@@ -73,9 +76,17 @@ async fn update_config(
     State(state): State<WebState>,
     Json(new_settings): Json<Settings>,
 ) -> Json<UpdateResult> {
-    let mut settings = state.settings.write().await;
-    *settings = new_settings;
-    // In a real app, we might trigger pipeline restarts here
+    {
+        let mut settings = state.settings.write().await;
+        *settings = new_settings.clone();
+    }
+    if let Err(e) = new_settings.save(&state.config_path) {
+        return Json(UpdateResult {
+            ok: false,
+            message: format!("Failed to save config: {}", e),
+        });
+    }
+    let _ = state.settings_tx.send(new_settings);
     Json(UpdateResult {
         ok: true,
         message: "Settings updated successfully".to_string(),

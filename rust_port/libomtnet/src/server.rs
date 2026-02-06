@@ -2,10 +2,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use crate::frame::OMTFrame;
 use crate::channel::OMTChannel;
-use crate::constants::{NETWORK_SEND_RECEIVE_BUFFER, NETWORK_SEND_BUFFER};
 use std::io;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use futures::{SinkExt, StreamExt};
 
 pub struct OMTServer {
@@ -47,12 +44,12 @@ impl OMTServer {
     }
 }
 
-async fn handle_connection(mut socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -> Result<(), io::Error> {
+async fn handle_connection(socket: TcpStream, tx: broadcast::Sender<OMTFrame>) -> Result<(), io::Error> {
     // Configure socket buffers
     // Note: OMT logic sets specific buffer sizes
     // We can rely on OS defaults or set them if critical via socket2 crate or implicit behavior.
     
-    let mut channel = OMTChannel::new(socket);
+    let channel = OMTChannel::new(socket);
     let mut rx = tx.subscribe();
 
     let (mut sink, mut stream) = channel.into_split();

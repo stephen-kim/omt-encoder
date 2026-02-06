@@ -1,24 +1,22 @@
 use std::sync::Arc;
-use tokio::sync::broadcast;
-use libomtnet::{OMTFrame, OMTFrameType};
 use std::thread;
 use std::time::Duration;
-use bytes::BufMut;
 
 use crate::settings::AudioSettings;
+use crate::send_coordinator::SendCoordinator;
 
 pub struct AudioPipeline {
     settings: AudioSettings,
-    tx: broadcast::Sender<OMTFrame>,
+    send: SendCoordinator,
     running: Arc<std::sync::atomic::AtomicBool>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl AudioPipeline {
-    pub fn new(settings: AudioSettings, tx: broadcast::Sender<OMTFrame>) -> Self {
+    pub fn new(settings: AudioSettings, send: SendCoordinator) -> Self {
         AudioPipeline {
             settings,
-            tx,
+            send,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             thread_handle: None,
         }
@@ -33,14 +31,14 @@ impl AudioPipeline {
         self.running.store(true, std::sync::atomic::Ordering::SeqCst);
         let running = self.running.clone();
         let settings = self.settings.clone();
-        let tx = self.tx.clone();
+        let send = self.send.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
             #[cfg(target_os = "linux")]
-            linux::run_audio_loop(running, settings, tx);
+            linux::run_audio_loop(running, settings, send);
 
             #[cfg(not(target_os = "linux"))]
-            stub::run_audio_loop(running, settings, tx);
+            stub::run_audio_loop(running, settings, send);
         }));
     }
 
@@ -55,7 +53,7 @@ impl AudioPipeline {
 #[cfg(not(target_os = "linux"))]
 mod stub {
     use super::*;
-    pub fn run_audio_loop(running: Arc<std::sync::atomic::AtomicBool>, _settings: AudioSettings, _tx: broadcast::Sender<OMTFrame>) {
+    pub fn run_audio_loop(running: Arc<std::sync::atomic::AtomicBool>, _settings: AudioSettings, _send: SendCoordinator) {
         println!("Available on Linux only. Stubbing audio loop for macOS.");
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Simulate work
@@ -70,18 +68,32 @@ mod linux {
     use alsa::{Direction, ValueOr};
     use alsa::pcm::{PCM, HwParams, Format, Access, State};
     use std::ffi::CString;
+    use bytes::BufMut;
+    use libomtnet::{OMTFrame, OMTFrameType};
 
-    pub fn run_audio_loop(running: Arc<std::sync::atomic::AtomicBool>, settings: AudioSettings, tx: broadcast::Sender<OMTFrame>) {
+    pub fn run_audio_loop(running: Arc<std::sync::atomic::AtomicBool>, settings: AudioSettings, send: SendCoordinator) {
         println!("Starting Linux ALSA pipeline...");
         
         let pcm_hdmi = if settings.mode == "hdmi" || settings.mode == "both" {
-            open_pcm(&settings.hdmi_device, settings.sample_rate, settings.channels).ok()
+            open_pcm(
+                &settings.hdmi_device,
+                settings.sample_rate,
+                settings.channels,
+                settings.arecord_buffer_usec,
+                settings.arecord_period_usec,
+            ).ok()
         } else {
             None
         };
 
         let pcm_trs = if settings.mode == "trs" || settings.mode == "both" {
-            open_pcm(&settings.trs_device, settings.sample_rate, settings.channels).ok()
+            open_pcm(
+                &settings.trs_device,
+                settings.sample_rate,
+                settings.channels,
+                settings.arecord_buffer_usec,
+                settings.arecord_period_usec,
+            ).ok()
         } else {
             None
         };
@@ -98,6 +110,19 @@ mod linux {
         let mut hdmi_buf = vec![0.0f32; buffer_size];
         let mut trs_buf = vec![0.0f32; buffer_size];
         let mut mix_buf = vec![0.0f32; buffer_size];
+        let mut monitor_buf = vec![0.0f32; buffer_size];
+
+        let pcm_monitor = if settings.monitor.enabled {
+            open_pcm_playback(
+                &settings.monitor.device,
+                settings.sample_rate,
+                settings.channels,
+                settings.arecord_buffer_usec,
+                settings.arecord_period_usec,
+            ).ok()
+        } else {
+            None
+        };
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
              let mut hdmi_ok = false;
@@ -137,6 +162,17 @@ mod linux {
                  
                  mix_buf[i] = sample;
              }
+
+             if let Some(pcm) = &pcm_monitor {
+                 let gain = settings.monitor.gain;
+                 for i in 0..buffer_size {
+                     let mut sample = mix_buf[i] * gain;
+                     if sample > 1.0 { sample = 1.0; }
+                     if sample < -1.0 { sample = -1.0; }
+                     monitor_buf[i] = sample;
+                 }
+                 let _ = write_pcm(pcm, &monitor_buf, frame_size);
+             }
              
              // Create Frame
              let mut frame = OMTFrame::new(OMTFrameType::Audio);
@@ -170,13 +206,11 @@ mod linux {
              frame.data = byte_data.freeze();
              frame.update_data_length();
 
-             if let Err(_) = tx.send(frame) {
-                 // No receivers? that's fine.
-             }
+             send.enqueue_audio(frame);
         }
     }
 
-    fn open_pcm(device: &str, rate: u32, channels: u32) -> Result<PCM, alsa::Error> {
+    fn open_pcm(device: &str, rate: u32, channels: u32, buffer_usec: u32, period_usec: u32) -> Result<PCM, alsa::Error> {
         let pcm = PCM::new(device, Direction::Capture, false)?;
         
         let hwp = HwParams::any(&pcm)?;
@@ -184,8 +218,30 @@ mod linux {
         hwp.set_rate(rate, ValueOr::Nearest)?;
         hwp.set_format(Format::float())?; // Try float first
         hwp.set_access(Access::RWInterleaved)?;
-        // Buffer size?
+        if buffer_usec > 0 {
+            let _ = hwp.set_buffer_time(buffer_usec, ValueOr::Nearest);
+        }
+        if period_usec > 0 {
+            let _ = hwp.set_period_time(period_usec, ValueOr::Nearest);
+        }
         
+        pcm.hw_params(&hwp)?;
+        Ok(pcm)
+    }
+
+    fn open_pcm_playback(device: &str, rate: u32, channels: u32, buffer_usec: u32, period_usec: u32) -> Result<PCM, alsa::Error> {
+        let pcm = PCM::new(device, Direction::Playback, false)?;
+        let hwp = HwParams::any(&pcm)?;
+        hwp.set_channels(channels)?;
+        hwp.set_rate(rate, ValueOr::Nearest)?;
+        hwp.set_format(Format::float())?;
+        hwp.set_access(Access::RWInterleaved)?;
+        if buffer_usec > 0 {
+            let _ = hwp.set_buffer_time(buffer_usec, ValueOr::Nearest);
+        }
+        if period_usec > 0 {
+            let _ = hwp.set_period_time(period_usec, ValueOr::Nearest);
+        }
         pcm.hw_params(&hwp)?;
         Ok(pcm)
     }
@@ -203,6 +259,22 @@ mod linux {
             Err(e) => {
                 // Try recover
                 println!("ALSA read error: {}", e);
+                pcm.try_recover(e, false)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn write_pcm(pcm: &PCM, buf: &[f32], frames: usize) -> Result<(), alsa::Error> {
+        let io = pcm.io_f32()?;
+        match io.writei(buf) {
+            Ok(count) => {
+                if count != frames {
+                    // Short write; ignore.
+                }
+                Ok(())
+            }
+            Err(e) => {
                 pcm.try_recover(e, false)?;
                 Ok(())
             }

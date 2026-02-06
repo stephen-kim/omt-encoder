@@ -140,7 +140,7 @@ impl Default for PreviewSettings {
             width: 1920,
             height: 1080,
             fps: 30,
-            pixel_format: "BGRA".to_string(),
+            pixel_format: "rgb565le".to_string(),
         }
     }
 }

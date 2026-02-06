@@ -1,0 +1,13 @@
+[Unit]
+Description=OMT Capture (Rust)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/omtcapture-rs
+ExecStart=/opt/omtcapture-rs/omtcapture
+Restart=on-failure
+RestartSec=2
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target
