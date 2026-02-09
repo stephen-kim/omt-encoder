@@ -214,16 +214,15 @@ async fn handle_connection(
     let prod_state = Arc::clone(&state);
     let producer = tokio::spawn(async move {
         loop {
-            let (want_video, want_audio, want_meta) = {
+            let (want_video, want_audio) = {
                 let st = prod_state.lock().await;
-                (st.wants_video, st.wants_audio, st.wants_metadata)
+                (st.wants_video, st.wants_audio)
             };
 
             let frame = tokio::select! {
                 v = rx_video.recv(), if want_video => v,
                 a = rx_audio.recv(), if want_audio => a,
-                m = rx_meta.recv(), if want_meta => m,
-                // If nothing is subscribed yet, keep processing metadata to allow subscription.
+                // Match C#: metadata is not gated by subscriptions (used for tally/info/redirect).
                 m = rx_meta.recv() => m,
             };
             let frame = match frame {
