@@ -328,8 +328,8 @@ mod linux {
                         );
                         continue;
                     }
-                    ctx.input_buf
-                        .copy_from_slice(&raw_data[..ctx.input_buf.len()]);
+                    let input_len = ctx.input_buf.len();
+                    ctx.input_buf.copy_from_slice(&raw_data[..input_len]);
                     if ctx.stdin.write_all(&ctx.input_buf).is_err() {
                         eprintln!("Transform stdin write failed.");
                         break;
