@@ -7,11 +7,18 @@ use std::io;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, watch, Mutex};
+
+#[derive(Clone)]
+pub struct ServerSenders {
+    pub video: broadcast::Sender<OMTFrame>,
+    pub audio: broadcast::Sender<OMTFrame>,
+    pub metadata: broadcast::Sender<OMTFrame>,
+}
 
 pub struct OMTServer {
     listener: TcpListener,
-    tx: broadcast::Sender<OMTFrame>,
+    tx: ServerSenders,
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
 }
@@ -21,18 +28,26 @@ impl OMTServer {
         let addr = format!("0.0.0.0:{}", port);
         let listener = TcpListener::bind(addr).await?;
 
-        // Channel capacity: how many frames to buffer before lagging receivers miss out
-        let (tx, _) = broadcast::channel(100);
+        // Keep sender-side buffering small to avoid multi-second latency.
+        // IMPORTANT: video/audio are sent on separate TCP connections by the receiver, so
+        // separating channels lets us tune buffering independently.
+        let (tx_video, _) = broadcast::channel(4); // ~133ms at 30fps
+        let (tx_audio, _) = broadcast::channel(64); // tolerate short stalls without big delay
+        let (tx_meta, _) = broadcast::channel(64);
 
         Ok(OMTServer {
             listener,
-            tx,
+            tx: ServerSenders {
+                video: tx_video,
+                audio: tx_audio,
+                metadata: tx_meta,
+            },
             metadata_state: Arc::new(Mutex::new(ServerMetadataState::default())),
             suggested_quality_hint: Arc::new(AtomicU8::new(0)),
         })
     }
 
-    pub fn get_sender(&self) -> broadcast::Sender<OMTFrame> {
+    pub fn get_senders(&self) -> ServerSenders {
         self.tx.clone()
     }
 
@@ -134,7 +149,7 @@ impl Default for SubscriptionState {
 
 async fn handle_connection(
     socket: TcpStream,
-    tx: broadcast::Sender<OMTFrame>,
+    tx: ServerSenders,
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
     conn_id: u64,
@@ -144,7 +159,9 @@ async fn handle_connection(
     // We can rely on OS defaults or set them if critical via socket2 crate or implicit behavior.
 
     let channel = OMTChannel::new(socket);
-    let mut rx = tx.subscribe();
+    let mut rx_video = tx.video.subscribe();
+    let mut rx_audio = tx.audio.subscribe();
+    let mut rx_meta = tx.metadata.subscribe();
 
     let (mut sink, mut stream) = channel.into_split();
 
@@ -160,7 +177,7 @@ async fn handle_connection(
                 .filter(|v| !v.trim().is_empty()),
         );
         xmls.push(format!(
-            "<OMTTally Preview=\"{}\" Program==\"{}\" />",
+            "<OMTTally Preview=\"{}\" Program=\"{}\" />",
             if st.tally_preview { "true" } else { "false" },
             if st.tally_program { "true" } else { "false" }
         ));
@@ -186,52 +203,100 @@ async fn handle_connection(
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint).await;
 
-    // Spawn send task (Broadcast -> TCP)
-    let send_state = Arc::clone(&state);
-    let send_task = tokio::spawn(async move {
+    // Low-latency send model (matches C# spirit):
+    // - Video is "latest-wins" (no queueing): if the connection can't keep up, we prefer the newest
+    //   frame over building latency.
+    // - Audio/metadata are queued with a small bound; if full, we drop to avoid runaway latency.
+    let (tx_video_latest, mut rx_video_latest) = watch::channel::<Option<OMTFrame>>(None);
+    let (tx_other, mut rx_other) = mpsc::channel::<OMTFrame>(64);
+
+    // Producer: Broadcast -> per-connection channels (non-blocking).
+    let prod_state = Arc::clone(&state);
+    let producer = tokio::spawn(async move {
         loop {
-            let frame = match rx.recv().await {
+            let (want_video, want_audio, want_meta) = {
+                let st = prod_state.lock().await;
+                (st.wants_video, st.wants_audio, st.wants_metadata)
+            };
+
+            let frame = tokio::select! {
+                v = rx_video.recv(), if want_video => v,
+                a = rx_audio.recv(), if want_audio => a,
+                m = rx_meta.recv(), if want_meta => m,
+                // If nothing is subscribed yet, keep processing metadata to allow subscription.
+                m = rx_meta.recv() => m,
+            };
+            let frame = match frame {
                 Ok(frame) => frame,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    eprintln!(
-                        "Sender lagged on client stream (skipped {} frames). Continuing.",
-                        skipped
-                    );
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_skipped)) => {
+                    // Prefer dropping over latency; receiver is slow.
                     continue;
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    break;
-                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
             let allowed = {
-                let state = send_state.lock().await;
+                let st = prod_state.lock().await;
                 match frame.header.frame_type {
-                    // Match C#: metadata always passes subscription filter
                     OMTFrameType::Metadata => true,
-                    OMTFrameType::Video => state.wants_video,
-                    OMTFrameType::Audio => state.wants_audio,
+                    OMTFrameType::Video => st.wants_video,
+                    OMTFrameType::Audio => st.wants_audio,
                     _ => false,
                 }
             };
             if !allowed {
                 continue;
             }
-            let maybe_preview_frame = {
-                let st = send_state.lock().await;
-                if st.preview && frame.header.frame_type == OMTFrameType::Video {
-                    let mut f = frame.clone();
-                    f.preview_mode = true;
-                    if f.preview_data_length.is_none() {
-                        f.preview_data_length = Some(f.header.data_length);
-                    }
-                    f
-                } else {
-                    frame
+
+            match frame.header.frame_type {
+                OMTFrameType::Video => {
+                    let _ = tx_video_latest.send_replace(Some(frame));
                 }
-            };
-            if let Err(e) = sink.send(maybe_preview_frame).await {
-                return Err(e);
+                OMTFrameType::Audio | OMTFrameType::Metadata => {
+                    let _ = tx_other.try_send(frame);
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Writer: per-connection channels -> TCP.
+    let write_state = Arc::clone(&state);
+    let send_task = tokio::spawn(async move {
+        loop {
+            let want_video = { write_state.lock().await.wants_video };
+            tokio::select! {
+                changed = rx_video_latest.changed(), if want_video => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let frame = match rx_video_latest.borrow().as_ref() {
+                        Some(f) => f.clone(),
+                        None => continue,
+                    };
+                    let frame = {
+                        let st = write_state.lock().await;
+                        if st.preview && frame.header.frame_type == OMTFrameType::Video {
+                            let mut f = frame.clone();
+                            f.preview_mode = true;
+                            if f.preview_data_length.is_none() {
+                                f.preview_data_length = Some(f.header.data_length);
+                            }
+                            f
+                        } else {
+                            frame
+                        }
+                    };
+                    if let Err(e) = sink.send(frame).await {
+                        return Err(e);
+                    }
+                }
+                maybe = rx_other.recv() => {
+                    let Some(frame) = maybe else { break; };
+                    if let Err(e) = sink.send(frame).await {
+                        return Err(e);
+                    }
+                }
             }
         }
         Ok::<(), io::Error>(())
@@ -268,6 +333,7 @@ async fn handle_connection(
     }
 
     remove_connection_suggested_quality(conn_id, &metadata_state, &suggested_quality_hint).await;
+    let _ = producer.await;
     let _ = send_task.await;
     Ok(())
 }
@@ -302,25 +368,25 @@ async fn handle_subscription_frame(frame: &OMTFrame, state: &Arc<Mutex<Subscript
                 state.lock().await.preview = false;
                 return;
             }
-            "<OMTTally Preview=\"true\" Program==\"true\" />" => {
+            "<OMTTally Preview=\"true\" Program=\"true\" />" | "<OMTTally Preview=\"true\" Program==\"true\" />" => {
                 let mut st = state.lock().await;
                 st.tally_preview = true;
                 st.tally_program = true;
                 return;
             }
-            "<OMTTally Preview=\"false\" Program==\"true\" />" => {
+            "<OMTTally Preview=\"false\" Program=\"true\" />" | "<OMTTally Preview=\"false\" Program==\"true\" />" => {
                 let mut st = state.lock().await;
                 st.tally_preview = false;
                 st.tally_program = true;
                 return;
             }
-            "<OMTTally Preview=\"true\" Program==\"false\" />" => {
+            "<OMTTally Preview=\"true\" Program=\"false\" />" | "<OMTTally Preview=\"true\" Program==\"false\" />" => {
                 let mut st = state.lock().await;
                 st.tally_preview = true;
                 st.tally_program = false;
                 return;
             }
-            "<OMTTally Preview=\"false\" Program==\"false\" />" => {
+            "<OMTTally Preview=\"false\" Program=\"false\" />" | "<OMTTally Preview=\"false\" Program==\"false\" />" => {
                 let mut st = state.lock().await;
                 st.tally_preview = false;
                 st.tally_program = false;

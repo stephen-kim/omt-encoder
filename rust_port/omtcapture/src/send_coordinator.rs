@@ -4,7 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tokio::sync::broadcast;
+use libomtnet::ServerSenders;
 
 use crate::settings::SendSettings;
 use libomtnet::OMTFrame;
@@ -33,7 +33,7 @@ struct Inner {
     stats: Mutex<SendStats>,
     cv: Condvar,
     running: AtomicBool,
-    tx: broadcast::Sender<OMTFrame>,
+    tx: ServerSenders,
     settings: SendSettings,
 }
 
@@ -43,7 +43,7 @@ pub struct SendCoordinator {
 }
 
 impl SendCoordinator {
-    pub fn new(tx: broadcast::Sender<OMTFrame>, settings: SendSettings) -> Self {
+    pub fn new(tx: ServerSenders, settings: SendSettings) -> Self {
         let audio_capacity = clamp(settings.audio_queue_capacity, 1, 16);
         let video_capacity = clamp(settings.video_queue_capacity, 1, 8);
         let inner = Arc::new(Inner {
@@ -155,7 +155,17 @@ fn run_send_loop(inner: Arc<Inner>) {
             } else {
                 frame.header.timestamp = monotonic_timestamp_100ns();
             }
-            if inner.tx.send(frame).is_err() {
+            let send_result = if is_audio {
+                inner.tx.audio.send(frame)
+            } else {
+                inner.tx.video.send(frame)
+            };
+
+            let receivers = match send_result {
+                Ok(n) => n,
+                Err(_) => 0,
+            };
+            if receivers == 0 {
                 let mut stats = inner.stats.lock().unwrap();
                 if is_audio {
                     stats.audio_send_zero += 1;

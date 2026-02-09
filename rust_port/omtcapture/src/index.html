@@ -757,12 +757,16 @@ async function saveConfig() {
   const payload = await (await fetch('/api/config')).json();
   payload.video.name = document.getElementById('videoName').value;
   payload.video.device_path = document.getElementById('videoDevicePath').value;
-  payload.video.width = Number(document.getElementById('videoWidth').value);
-  payload.video.height = Number(document.getElementById('videoHeight').value);
-  payload.video.frame_rate_n = Number(document.getElementById('videoFrameRateN').value);
-  payload.video.frame_rate_d = Number(document.getElementById('videoFrameRateD').value);
   payload.video.use_native_format = document.getElementById('videoUseNative').checked;
-  payload.video.codec = document.getElementById('videoCodec').value;
+
+  // If native input is enabled, transform fields are disabled; don't overwrite them with blanks/0.
+  if (!payload.video.use_native_format) {
+    payload.video.width = Number(document.getElementById('videoWidth').value);
+    payload.video.height = Number(document.getElementById('videoHeight').value);
+    payload.video.frame_rate_n = Number(document.getElementById('videoFrameRateN').value);
+    payload.video.frame_rate_d = Number(document.getElementById('videoFrameRateD').value);
+    payload.video.codec = document.getElementById('videoCodec').value;
+  }
 
   const selectedInputs = getAudioInputSelection().slice(0, 2);
   if (selectedInputs.length === 0) {
@@ -796,8 +800,11 @@ async function saveConfig() {
   payload.preview.fps = Number(document.getElementById('previewFps').value);
   payload.preview.pixel_format = document.getElementById('previewPixelFormat').value;
 
-  payload.send.audio_queue_capacity = Number(document.getElementById('sendAudioQueueCapacity').value);
-  payload.send.video_queue_capacity = Number(document.getElementById('sendVideoQueueCapacity').value);
+  // Prevent accidental 0/NaN from empty inputs (which can trigger full pipeline restart).
+  const aq = Number(document.getElementById('sendAudioQueueCapacity').value);
+  const vq = Number(document.getElementById('sendVideoQueueCapacity').value);
+  if (Number.isFinite(aq) && aq >= 1) payload.send.audio_queue_capacity = aq;
+  if (Number.isFinite(vq) && vq >= 1) payload.send.video_queue_capacity = vq;
   payload.send.force_zero_timestamps = document.getElementById('sendForceZeroTimestamps').checked;
 
   payload.web.port = Number(document.getElementById('webPort').value);

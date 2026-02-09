@@ -88,6 +88,11 @@ async fn update_config(
     };
 
     normalize_audio_mode(&mut new_settings);
+    clamp_send_settings(&mut new_settings);
+    // Defensive merge: the browser UI can submit empty strings for selects/inputs
+    // (e.g. when toggling checkboxes disables sections). Avoid nuking critical fields
+    // and accidentally stopping unrelated pipelines.
+    merge_empty_fields(&old_settings, &mut new_settings);
     {
         let mut settings = state.settings.write().await;
         *settings = new_settings.clone();
@@ -118,6 +123,80 @@ fn normalize_audio_mode(settings: &mut Settings) {
             settings.audio.trs_device.clear();
         }
         _ => {}
+    }
+}
+
+fn clamp_send_settings(settings: &mut Settings) {
+    // Keep values in a sane range even if UI submits empty/0.
+    settings.send.audio_queue_capacity = settings.send.audio_queue_capacity.clamp(1, 16);
+    settings.send.video_queue_capacity = settings.send.video_queue_capacity.clamp(1, 8);
+}
+
+fn merge_empty_fields(old: &Settings, new: &mut Settings) {
+    // Video: never allow empty device path/codec/name via UI glitches.
+    if new.video.device_path.trim().is_empty() {
+        new.video.device_path = old.video.device_path.clone();
+    }
+    if new.video.codec.trim().is_empty() {
+        new.video.codec = old.video.codec.clone();
+    }
+    if new.video.name.trim().is_empty() {
+        new.video.name = old.video.name.clone();
+    }
+    if new.video.width == 0 {
+        new.video.width = old.video.width;
+    }
+    if new.video.height == 0 {
+        new.video.height = old.video.height;
+    }
+    if new.video.frame_rate_n == 0 {
+        new.video.frame_rate_n = old.video.frame_rate_n;
+    }
+    if new.video.frame_rate_d == 0 {
+        new.video.frame_rate_d = old.video.frame_rate_d;
+    }
+
+    // Preview: keep list stable if UI omits it.
+    if new.preview.output_devices.is_empty() && !old.preview.output_devices.is_empty() {
+        new.preview.output_devices = old.preview.output_devices.clone();
+    }
+
+    // Audio: allow intentional disable via mode=none, but otherwise keep device strings.
+    let mode = new.audio.mode.trim().to_ascii_lowercase();
+    if mode != "none" {
+        if (mode == "hdmi" || mode == "both") && new.audio.hdmi_device.trim().is_empty() {
+            new.audio.hdmi_device = old.audio.hdmi_device.clone();
+        }
+        if (mode == "trs" || mode == "both") && new.audio.trs_device.trim().is_empty() {
+            new.audio.trs_device = old.audio.trs_device.clone();
+        }
+    }
+    if new.audio.sample_rate == 0 {
+        new.audio.sample_rate = old.audio.sample_rate;
+    }
+    if new.audio.channels == 0 {
+        new.audio.channels = old.audio.channels;
+    }
+    if new.audio.samples_per_channel == 0 {
+        new.audio.samples_per_channel = old.audio.samples_per_channel;
+    }
+    // mix_gain is f32; if UI sends NaN, reset to old.
+    if !new.audio.mix_gain.is_finite() {
+        new.audio.mix_gain = old.audio.mix_gain;
+    }
+    if new.audio.arecord_buffer_usec == 0 {
+        new.audio.arecord_buffer_usec = old.audio.arecord_buffer_usec;
+    }
+    if new.audio.arecord_period_usec == 0 {
+        new.audio.arecord_period_usec = old.audio.arecord_period_usec;
+    }
+
+    // Monitor settings
+    if new.audio.monitor.device.trim().is_empty() {
+        new.audio.monitor.device = old.audio.monitor.device.clone();
+    }
+    if !new.audio.monitor.gain.is_finite() {
+        new.audio.monitor.gain = old.audio.monitor.gain;
     }
 }
 

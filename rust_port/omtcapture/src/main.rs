@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         )))
         .await;
     server.set_tally(false, false).await;
-    let tx = server.get_sender();
+    let tx = server.get_senders();
 
     let initial_settings = shared_settings.read().await.clone();
     let send = SendCoordinator::new(tx.clone(), initial_settings.send.clone());
