@@ -250,8 +250,8 @@ mod linux {
         let mut current_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
         if codec_to_vmx_image_format(output_codec).is_some() {
             let size = root::VMX_SIZE {
-                Width: output_width as i32,
-                Height: output_height as i32,
+                width: output_width as i32,
+                height: output_height as i32,
             };
             unsafe {
                 let inst = root::VMX_Create(
@@ -281,8 +281,8 @@ mod linux {
                         let previous_quality = root::VMX_GetQuality(inst);
                         root::VMX_Destroy(inst);
                         let size = root::VMX_SIZE {
-                            Width: output_width as i32,
-                            Height: output_height as i32,
+                            width: output_width as i32,
+                            height: output_height as i32,
                         };
                         let new_inst = root::VMX_Create(
                             size,
@@ -359,7 +359,13 @@ mod linux {
                 (vmx_instance, codec_to_vmx_image_format(frame_codec))
             {
                 let err = unsafe {
-                    vmx_encode_frame(inst, frame_codec, payload.as_ptr(), frame_stride as i32)
+                    vmx_encode_frame(
+                        inst,
+                        frame_codec,
+                        payload.as_ptr(),
+                        frame_height,
+                        frame_stride as i32,
+                    )
                 };
                 if err == root::VMX_ERR_VMX_ERR_OK {
                     let compressed_len = unsafe {
@@ -510,13 +516,18 @@ mod linux {
         inst: *mut root::VMX_INSTANCE,
         codec: OMTCodec,
         data_ptr: *const u8,
+        height: u32,
         stride: i32,
     ) -> root::VMX_ERR {
-        let ptr = data_ptr as *mut std::ffi::c_void;
+        let ptr = data_ptr as *mut u8;
         match codec {
             OMTCodec::UYVY => root::VMX_EncodeUYVY(inst, ptr, stride, 0),
             OMTCodec::YUY2 => root::VMX_EncodeYUY2(inst, ptr, stride, 0),
-            OMTCodec::NV12 => root::VMX_EncodeNV12(inst, ptr, stride, 0),
+            OMTCodec::NV12 => {
+                let y_bytes = (stride as usize).saturating_mul(height as usize);
+                let uv_ptr = ptr.add(y_bytes);
+                root::VMX_EncodeNV12(inst, ptr, stride, uv_ptr, stride, 0)
+            }
             OMTCodec::BGRA => root::VMX_EncodeBGRA(inst, ptr, stride, 0),
             OMTCodec::P216 => root::VMX_EncodeP216(inst, ptr, stride, 0),
             _ => root::VMX_ERR_VMX_ERR_INVALID_CODEC_FORMAT,
