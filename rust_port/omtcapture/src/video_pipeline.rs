@@ -90,9 +90,11 @@ mod linux {
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     use v4l::buffer::Type;
     use v4l::format::FourCC;
+    use v4l::fraction::Fraction;
     use v4l::io::traits::CaptureStream;
     use v4l::prelude::*;
     use v4l::video::Capture;
+    use v4l::video::capture::Parameters as CaptureParameters;
 
     struct TransformContext {
         child: Child,
@@ -144,6 +146,19 @@ mod linux {
                 return;
             }
         };
+
+        // Try to set capture frame interval (fps). Some devices ignore this, but when supported
+        // it can reduce internal buffering and stabilize capture timing.
+        if settings.frame_rate_n > 0 {
+            let interval = Fraction::new(
+                settings.frame_rate_d.max(1),
+                settings.frame_rate_n.max(1),
+            );
+            let params = CaptureParameters::new(interval);
+            if let Err(e) = dev.set_params(&params) {
+                eprintln!("Warning: failed to set V4L2 capture params (fps): {}", e);
+            }
+        }
 
         let input_width = fmt.width;
         let input_height = fmt.height;
@@ -223,7 +238,9 @@ mod linux {
             eprintln!("Transform unavailable. Falling back to native output.");
         }
 
-        let mut stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 4) {
+        // Fewer kernel-side buffers reduces capture->send latency.
+        // 2 is usually safe at 1080p30 on Pi-class hardware; increase if you see V4L2 overruns.
+        let mut stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 2) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to create video stream: {}", e);

@@ -14,6 +14,11 @@ struct Queues {
     video: VecDeque<OMTFrame>,
 }
 
+// If both audio and video are queued, don't let audio fully starve video.
+// `AudioPipeline` can enqueue far more frequently than video; if we always send audio first,
+// video can accumulate seconds of delay.
+const AUDIO_BURST_BEFORE_VIDEO: usize = 4;
+
 #[derive(Default)]
 struct SendStats {
     audio_dropped: usize,
@@ -109,6 +114,7 @@ impl Drop for SendCoordinator {
 }
 
 fn run_send_loop(inner: Arc<Inner>) {
+    let mut audio_budget = AUDIO_BURST_BEFORE_VIDEO;
     while inner.running.load(Ordering::SeqCst) {
         let mut next_frame = None;
         let mut is_audio = false;
@@ -122,11 +128,24 @@ fn run_send_loop(inner: Arc<Inner>) {
                     .0;
             }
 
-            if let Some(frame) = guard.audio.pop_front() {
-                next_frame = Some(frame);
-                is_audio = true;
+            let has_audio = !guard.audio.is_empty();
+            let has_video = !guard.video.is_empty();
+
+            // If video is waiting and we've sent a burst of audio frames, force a video frame out.
+            if has_video && (!has_audio || audio_budget == 0) {
+                if let Some(frame) = guard.video.pop_front() {
+                    next_frame = Some(frame);
+                    audio_budget = AUDIO_BURST_BEFORE_VIDEO;
+                }
+            } else if has_audio {
+                if let Some(frame) = guard.audio.pop_front() {
+                    next_frame = Some(frame);
+                    is_audio = true;
+                    audio_budget = audio_budget.saturating_sub(1);
+                }
             } else if let Some(frame) = guard.video.pop_front() {
                 next_frame = Some(frame);
+                audio_budget = AUDIO_BURST_BEFORE_VIDEO;
             }
         }
 
