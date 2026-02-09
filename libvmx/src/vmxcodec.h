@@ -27,7 +27,9 @@
 #include <cstdint>
 #include <cstring>
 #include "thread_tasks.h"
-#ifdef _MSC_VER
+#if defined(__clang__) || defined(__GNUC__)
+#define VMX_API extern "C" __attribute__((visibility("default")))
+#elif defined(_MSC_VER)
 #define VMX_API __declspec(dllexport)
 #else
 #define VMX_API extern "C" __attribute__((visibility("default")))
@@ -44,7 +46,9 @@
 #define AVX2 //Include AVX2 in all Intel builds as these functions will be dynamically called only if instruction set available.
 #endif
 
-#if defined(_MSC_VER) && !defined(__clang__) && !defined(__GNUC__)
+#if defined(__clang__) || defined(__GNUC__)
+#define VMX_ALIGNATTR(n) __attribute__((aligned(n)))
+#elif defined(_MSC_VER)
 #define VMX_ALIGNATTR(n) __declspec(align(n))
 #else
 #define VMX_ALIGNATTR(n) __attribute__((aligned(n)))
@@ -573,4 +577,3 @@ VMX_API int VMX_Test(VMX_INSTANCE* instance, short* src, short* dst);
 //Private functions
 void VMX_ResetData(VMX_SLICE_DATA* s);
 void VMX_ResetStream(VMX_INSTANCE* instance);
-

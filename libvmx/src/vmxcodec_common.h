@@ -26,10 +26,12 @@
 #include "vmxcodec.h"
 #include <math.h>
 
-#ifndef _MSC_VER
+#if defined(__clang__) || defined(__GNUC__)
 #define VMX_ALIGN_16 __attribute__((aligned(16)))
-#else
+#elif defined(_MSC_VER)
 #define VMX_ALIGN_16 __declspec(align(16))
+#else
+#define VMX_ALIGN_16 __attribute__((aligned(16)))
 #endif
 
 #define VMX_ALIGNMENT (64)

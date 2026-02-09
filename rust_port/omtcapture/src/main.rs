@@ -1,20 +1,21 @@
 mod audio_pipeline;
-mod video_pipeline;
-mod settings;
-mod web_server;
-mod send_coordinator;
 mod discovery;
+mod send_coordinator;
+mod settings;
+mod video_pipeline;
+mod web_server;
 
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::{RwLock, Mutex, watch};
-use tokio::signal;
 use audio_pipeline::AudioPipeline;
-use video_pipeline::VideoPipeline;
-use settings::Settings;
-use web_server::{WebState, start_web_server};
 use libomtnet::server::OMTServer;
 use send_coordinator::SendCoordinator;
+use settings::Settings;
+use std::path::Path;
+use std::sync::Arc;
+use tokio::signal;
+use tokio::sync::{watch, Mutex, RwLock};
+use video_pipeline::VideoPipeline;
+use web_server::{start_web_server, WebState};
 
 struct RuntimePipelines {
     audio: AudioPipeline,
@@ -30,27 +31,32 @@ async fn main() -> Result<()> {
 
     // Load or initialize settings
     let config_path = "config.json";
-    let settings = Settings::load(config_path).unwrap_or_else(|_| {
-        println!("Config file not found or invalid, using defaults.");
-        let defaults = Settings::default();
-        if let Err(e) = defaults.save(config_path) {
-            eprintln!("Failed to write default config: {}", e);
-        }
-        defaults
-    });
-    
+    let settings = load_settings_with_xml_fallback(config_path);
+
     let shared_settings = Arc::new(RwLock::new(settings));
     let (settings_tx, mut settings_rx) = watch::channel(shared_settings.read().await.clone());
 
     // Server on port 6400 (protocol port)
     let server = OMTServer::new(6400).await?;
+    let suggested_quality_hint = server.suggested_quality_hint();
+    server
+        .set_sender_info_xml(Some(build_sender_info_xml(
+            &shared_settings.read().await.video.name,
+        )))
+        .await;
+    server.set_tally(false, false).await;
     let tx = server.get_sender();
 
     let initial_settings = shared_settings.read().await.clone();
     let send = SendCoordinator::new(tx.clone(), initial_settings.send.clone());
     let mut audio = AudioPipeline::new(initial_settings.audio.clone(), send.clone());
     audio.start();
-    let mut video = VideoPipeline::new(initial_settings.video.clone(), initial_settings.preview.clone(), send.clone());
+    let mut video = VideoPipeline::new(
+        initial_settings.video.clone(),
+        initial_settings.preview.clone(),
+        send.clone(),
+        suggested_quality_hint.clone(),
+    );
     video.start();
 
     let _mdns_publisher = discovery::MdnsPublisher::start(&initial_settings.video.name, 6400);
@@ -62,21 +68,25 @@ async fn main() -> Result<()> {
     }));
 
     // Start Web Server
-    let web_port = shared_settings.read().await.web.port;
-    let web_state = WebState {
-        settings: shared_settings.clone(),
-        settings_tx: settings_tx.clone(),
-        config_path: config_path.to_string(),
-    };
-    
-    let _web_server_handle = tokio::spawn(async move {
-        if let Err(e) = start_web_server(web_port, web_state).await {
-            eprintln!("Web server error: {}", e);
-        }
-    });
+    let web_settings = shared_settings.read().await.web.clone();
+    if web_settings.enabled {
+        let web_state = WebState {
+            settings: shared_settings.clone(),
+            settings_tx: settings_tx.clone(),
+            config_path: config_path.to_string(),
+        };
+
+        tokio::spawn(async move {
+            if let Err(e) = start_web_server(web_settings.port, web_state).await {
+                eprintln!("Web server error: {}", e);
+            }
+        });
+    }
 
     let pipelines_for_updates = pipelines.clone();
     let tx_for_updates = tx.clone();
+    let server_for_updates = Arc::new(server);
+    let server_for_updates_task = Arc::clone(&server_for_updates);
     tokio::spawn(async move {
         loop {
             if settings_rx.changed().await.is_err() {
@@ -84,6 +94,7 @@ async fn main() -> Result<()> {
             }
             let new_settings = settings_rx.borrow().clone();
             let mut guard = pipelines_for_updates.lock().await;
+            let old_name = guard.settings.video.name.clone();
 
             let audio_changed = audio_settings_changed(&guard.settings, &new_settings);
             let video_changed = video_settings_changed(&guard.settings, &new_settings);
@@ -93,22 +104,40 @@ async fn main() -> Result<()> {
             if send_changed {
                 guard.audio.stop();
                 guard.video.stop();
-                guard.send = SendCoordinator::new(tx_for_updates.clone(), new_settings.send.clone());
+                guard.send =
+                    SendCoordinator::new(tx_for_updates.clone(), new_settings.send.clone());
                 guard.audio = AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
                 guard.audio.start();
-                guard.video = VideoPipeline::new(new_settings.video.clone(), new_settings.preview.clone(), guard.send.clone());
+                guard.video = VideoPipeline::new(
+                    new_settings.video.clone(),
+                    new_settings.preview.clone(),
+                    guard.send.clone(),
+                    suggested_quality_hint.clone(),
+                );
                 guard.video.start();
             } else {
                 if audio_changed {
                     guard.audio.stop();
-                    guard.audio = AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
+                    guard.audio =
+                        AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
                     guard.audio.start();
                 }
                 if video_changed || preview_changed {
                     guard.video.stop();
-                    guard.video = VideoPipeline::new(new_settings.video.clone(), new_settings.preview.clone(), guard.send.clone());
+                    guard.video = VideoPipeline::new(
+                        new_settings.video.clone(),
+                        new_settings.preview.clone(),
+                        guard.send.clone(),
+                        suggested_quality_hint.clone(),
+                    );
                     guard.video.start();
                 }
+            }
+
+            if old_name != new_settings.video.name {
+                server_for_updates_task
+                    .set_sender_info_xml(Some(build_sender_info_xml(&new_settings.video.name)))
+                    .await;
             }
 
             guard.settings = new_settings;
@@ -119,7 +148,7 @@ async fn main() -> Result<()> {
 
     // Run server and wait for shutdown
     tokio::select! {
-        res = server.run() => {
+        res = server_for_updates.run() => {
             if let Err(e) = res {
                 eprintln!("OMT Server error: {}", e);
             }
@@ -134,7 +163,7 @@ async fn main() -> Result<()> {
         guard.audio.stop();
         guard.video.stop();
     }
-    
+
     // Save settings on exit
     let final_settings = shared_settings.read().await;
     if let Err(e) = final_settings.save(config_path) {
@@ -142,6 +171,65 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn load_settings_with_xml_fallback(config_path: &str) -> Settings {
+    if let Ok(settings) = Settings::load(config_path) {
+        return settings;
+    }
+
+    let xml_path = Path::new(config_path).with_file_name("config.xml");
+    if xml_path.exists() {
+        match Settings::load_from_xml(&xml_path) {
+            Ok(settings) => {
+                println!(
+                    "Loaded legacy XML config from {} and migrated to {}",
+                    xml_path.display(),
+                    config_path
+                );
+                if let Err(e) = settings.save(config_path) {
+                    eprintln!("Failed to persist migrated JSON config: {}", e);
+                }
+                return settings;
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to parse legacy XML config {}: {}",
+                    xml_path.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    println!("Config file not found or invalid, using defaults.");
+    let defaults = Settings::default();
+    if let Err(e) = defaults.save(config_path) {
+        eprintln!("Failed to write default config: {}", e);
+    }
+    defaults
+}
+
+fn build_sender_info_xml(source_name: &str) -> String {
+    let product = if source_name.trim().is_empty() {
+        "OMT Capture".to_string()
+    } else {
+        source_name.trim().to_string()
+    };
+    format!(
+        "<OMTInfo ProductName=\"{}\" Manufacturer=\"OpenMediaTransport\" Version=\"{}\" />",
+        xml_escape_attr(&product),
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+fn xml_escape_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\'', "&apos;")
 }
 
 fn audio_settings_changed(old: &Settings, new: &Settings) -> bool {

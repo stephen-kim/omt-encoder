@@ -1,8 +1,9 @@
-use bytes::{Buf, BytesMut};
-use tokio_util::codec::{Decoder, Encoder};
-use crate::frame::{OMTFrame, OMTFrameHeader, OMTVideoHeader, OMTAudioHeader};
 use crate::enums::OMTFrameType;
+use crate::enums::OMTVideoFlags;
+use crate::frame::{OMTAudioHeader, OMTFrame, OMTFrameHeader, OMTVideoHeader};
+use bytes::{Buf, BytesMut};
 use std::io;
+use tokio_util::codec::{Decoder, Encoder};
 
 pub struct OMTFrameCodec;
 
@@ -24,10 +25,10 @@ impl Decoder for OMTFrameCodec {
         let mut cursor = io::Cursor::new(&src[..]);
         // We know we have at least SIZE bytes
         let header = OMTFrameHeader::read(&mut cursor)?;
-        
+
         // Total size on wire = Header (16) + Header.DataLength.
         // Because Header.DataLength includes ExtendedHeader + Payload.
-        
+
         let total_size = OMTFrameHeader::SIZE + header.data_length as usize;
 
         if src.len() < total_size {
@@ -47,6 +48,8 @@ impl Decoder for OMTFrameCodec {
             audio_header: None,
             metadata: bytes::Bytes::new(),
             data: bytes::Bytes::new(),
+            preview_mode: false,
+            preview_data_length: None,
         };
 
         // Read Extended Header
@@ -58,29 +61,29 @@ impl Decoder for OMTFrameCodec {
 
         match header.frame_type {
             OMTFrameType::Video => {
-                 let vh = OMTVideoHeader::read(&mut *src)?;
-                 frame.video_header = Some(vh);
-            },
+                let vh = OMTVideoHeader::read(&mut *src)?;
+                frame.video_header = Some(vh);
+            }
             OMTFrameType::Audio => {
                 let ah = OMTAudioHeader::read(&mut *src)?;
                 frame.audio_header = Some(ah);
-            },
+            }
             _ => {}
         }
 
         // Read Data
-        // Data len is header.data_length - extended_header_size
+        // Data length includes: (data payload) + (metadata at tail)
         let payload_len = header.data_length as usize - extended_header_size;
         let metadata_len = header.metadata_length as usize;
 
         if payload_len > 0 {
             let meta_len = metadata_len.min(payload_len);
+            let data_len = payload_len - meta_len;
+            if data_len > 0 {
+                frame.data = src.split_to(data_len).freeze();
+            }
             if meta_len > 0 {
                 frame.metadata = src.split_to(meta_len).freeze();
-            }
-            let remaining = payload_len - meta_len;
-            if remaining > 0 {
-                frame.data = src.split_to(remaining).freeze();
             }
         }
 
@@ -92,28 +95,51 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: OMTFrame, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let mut wire_header = item.header.clone();
+        let mut wire_video_header = item.video_header.clone();
+        let ext_len = match wire_header.frame_type {
+            OMTFrameType::Video => OMTVideoHeader::SIZE as i32,
+            OMTFrameType::Audio => OMTAudioHeader::SIZE as i32,
+            _ => 0,
+        };
+
+        if item.preview_mode {
+            let desired = item.preview_data_length.unwrap_or(wire_header.data_length);
+            wire_header.data_length = desired.max(ext_len);
+            if let Some(ref mut vh) = wire_video_header {
+                vh.flags |= OMTVideoFlags::Preview as u32;
+            }
+        }
+
         // 1. Write Header
-        item.header.write(&mut *dst);
+        wire_header.write(&mut *dst);
 
         // 2. Write Extended Header
-        if let Some(ref vh) = item.video_header {
-            if item.header.frame_type == OMTFrameType::Video {
+        if let Some(ref vh) = wire_video_header {
+            if wire_header.frame_type == OMTFrameType::Video {
                 vh.write(&mut *dst);
             }
         } else if let Some(ref ah) = item.audio_header {
-            if item.header.frame_type == OMTFrameType::Audio {
+            if wire_header.frame_type == OMTFrameType::Audio {
                 ah.write(&mut *dst);
             }
         }
 
-        // 3. Write Metadata + Data
-        if !item.metadata.is_empty() {
-            dst.extend_from_slice(&item.metadata);
+        // 3. Write Data + Metadata (metadata goes last per OMT protocol)
+        // Respect preview data length by truncating payload bytes when requested.
+        let payload_target = (wire_header.data_length - ext_len).max(0) as usize;
+        let total_payload = item.data.len() + item.metadata.len();
+        let send_payload = payload_target.min(total_payload);
+        let metadata_to_send = item.metadata.len().min(send_payload);
+        let data_to_send = send_payload.saturating_sub(metadata_to_send);
+
+        if data_to_send > 0 {
+            dst.extend_from_slice(&item.data[..data_to_send]);
         }
-        if !item.data.is_empty() {
-            dst.extend_from_slice(&item.data);
+        if metadata_to_send > 0 {
+            dst.extend_from_slice(&item.metadata[..metadata_to_send]);
         }
-        
+
         Ok(())
     }
 }

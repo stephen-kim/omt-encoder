@@ -43,7 +43,9 @@ fi
 if [[ "$SKIP_DEPS" != "1" ]]; then
   echo "Installing dependencies..."
   sudo apt update
-  sudo apt install -y git build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev
+  sudo apt install -y git build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev avahi-daemon avahi-utils
+  sudo systemctl enable avahi-daemon >/dev/null 2>&1 || true
+  sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
 
 if [[ "$SKIP_LCD" != "1" ]]; then
@@ -71,13 +73,16 @@ ensure_cmdline_flags
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Rust toolchain not found. Installing via rustup..."
-  curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+  export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+  export RUSTUP_INIT_SKIP_PATH_CHECK=1
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
 echo "Building Rust omtcapture (release)..."
 cd "$ROOT_DIR"
-cargo build --release
+cargo build --release -p omtcapture
 
 if [[ "$DISABLE_CSHARP" = "1" ]]; then
   if systemctl is-active --quiet omtcapture; then
@@ -111,6 +116,33 @@ sudo cp "$ROOT_DIR/omtcapture/omtcapture-rs.service" /etc/systemd/system/omtcapt
 sudo systemctl daemon-reload
 sudo systemctl enable omtcapture-rs
 sudo systemctl restart omtcapture-rs
+
+echo "Running post-install checks..."
+sleep 1
+if ! systemctl is-active --quiet omtcapture-rs; then
+  echo "ERROR: omtcapture-rs service is not active."
+  sudo systemctl status omtcapture-rs --no-pager || true
+  exit 1
+fi
+
+if ! sudo ss -lntp | grep -q ":6400 "; then
+  echo "ERROR: port 6400 is not listening."
+  sudo ss -lntp || true
+  exit 1
+fi
+
+if ! sudo ss -lntp | grep -q ":8080 "; then
+  echo "WARN: web UI port 8080 is not listening."
+fi
+
+if command -v avahi-browse >/dev/null 2>&1; then
+  if ! timeout 3 avahi-browse -rt _omt._tcp >/tmp/omt_avahi_check.txt 2>/dev/null; then
+    echo "WARN: avahi browse timed out."
+  fi
+  if ! grep -q "_omt._tcp" /tmp/omt_avahi_check.txt 2>/dev/null; then
+    echo "WARN: _omt._tcp mDNS service not discovered yet."
+  fi
+fi
 
 cat <<MESSAGE
 

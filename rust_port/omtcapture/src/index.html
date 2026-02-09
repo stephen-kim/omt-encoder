@@ -147,14 +147,14 @@ input:focus, select:focus, textarea:focus {
 input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-2); }
 
 .is-disabled {
-  opacity: 0.3;
-  filter: grayscale(0.8);
+  opacity: 0.18;
+  filter: grayscale(1) blur(0.5px);
   pointer-events: none;
   position: relative;
 }
 
 .is-disabled .help {
-  color: rgba(154, 164, 178, 0.45);
+  color: rgba(154, 164, 178, 0.35);
 }
 
 .is-disabled input,
@@ -170,9 +170,9 @@ input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(-
   margin: 10px 0 14px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(86, 212, 255, 0.08);
-  border: 1px dashed rgba(86, 212, 255, 0.35);
-  color: rgba(214, 241, 255, 0.9);
+  background: rgba(255, 179, 71, 0.12);
+  border: 1px dashed rgba(255, 179, 71, 0.55);
+  color: rgba(255, 219, 176, 0.95);
   font-size: 13px;
 }
 
@@ -295,7 +295,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
         <input id="videoUseNative" type="checkbox" onchange="toggleNativeInputs()" />
         <label for="videoUseNative">Use native input format (no transform)</label>
       </div>
-      <div class="help">Bypass scaling and pixel conversion for lowest latency.</div>
+      <div class="help">Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.</div>
 
       <div id="videoTransformFields">
         <div class="native-lock">Native input mode is enabled. Disable it to edit transforms.</div>
@@ -668,21 +668,21 @@ async function loadDevices() {
 
   const config = await (await fetch('/api/config')).json();
   setSelectOptions('monitorDevice', outputs, config.audio.monitor.device);
-  setSelectOptions('videoDevicePath', videoOptions, config.video.devicePath);
+  setSelectOptions('videoDevicePath', videoOptions, config.video.device_path);
   const audioContainer = document.getElementById('audioInputDevices');
   audioContainer.innerHTML = '';
   const selectedAudio = [];
   if (config.audio.mode === 'both') {
-    if (config.audio.hdmiDevice) {
-      selectedAudio.push(config.audio.hdmiDevice);
+    if (config.audio.hdmi_device) {
+      selectedAudio.push(config.audio.hdmi_device);
     }
-    if (config.audio.trsDevice) {
-      selectedAudio.push(config.audio.trsDevice);
+    if (config.audio.trs_device) {
+      selectedAudio.push(config.audio.trs_device);
     }
-  } else if (config.audio.mode === 'hdmi' && config.audio.hdmiDevice) {
-    selectedAudio.push(config.audio.hdmiDevice);
-  } else if (config.audio.mode === 'trs' && config.audio.trsDevice) {
-    selectedAudio.push(config.audio.trsDevice);
+  } else if (config.audio.mode === 'hdmi' && config.audio.hdmi_device) {
+    selectedAudio.push(config.audio.hdmi_device);
+  } else if (config.audio.mode === 'trs' && config.audio.trs_device) {
+    selectedAudio.push(config.audio.trs_device);
   }
   const selectedSet = new Set(selectedAudio);
   inputs.forEach(opt => {
@@ -706,7 +706,7 @@ async function loadDevices() {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.value = opt.value;
-    checkbox.checked = (config.preview.outputDevices || []).includes(opt.value);
+    checkbox.checked = (config.preview.output_devices || []).includes(opt.value);
     wrapper.appendChild(checkbox);
     wrapper.appendChild(document.createTextNode(opt.label));
     outputsContainer.appendChild(wrapper);
@@ -741,9 +741,9 @@ async function loadConfig() {
   document.getElementById('monitorGain').value = data.audio.monitor.gain;
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
-  setPreviewOutputs(data.preview.outputDevices || []);
+  setPreviewOutputs(data.preview.output_devices || []);
   document.getElementById('previewFps').value = data.preview.fps;
-  document.getElementById('previewPixelFormat').value = data.preview.pixelFormat;
+  document.getElementById('previewPixelFormat').value = data.preview.pixel_format;
 
   document.getElementById('sendAudioQueueCapacity').value = data.send.audio_queue_capacity;
   document.getElementById('sendVideoQueueCapacity').value = data.send.video_queue_capacity;
@@ -792,9 +792,9 @@ async function saveConfig() {
   payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
-  payload.preview.outputDevices = getPreviewOutputs();
+  payload.preview.output_devices = getPreviewOutputs();
   payload.preview.fps = Number(document.getElementById('previewFps').value);
-  payload.preview.pixelFormat = document.getElementById('previewPixelFormat').value;
+  payload.preview.pixel_format = document.getElementById('previewPixelFormat').value;
 
   payload.send.audio_queue_capacity = Number(document.getElementById('sendAudioQueueCapacity').value);
   payload.send.video_queue_capacity = Number(document.getElementById('sendVideoQueueCapacity').value);

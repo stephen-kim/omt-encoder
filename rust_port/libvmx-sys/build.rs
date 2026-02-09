@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 fn main() {
     let root_dir = PathBuf::from("../../libvmx/src");
-    
+
     // 1. Generate Bindings
     let bindings = bindgen::Builder::default()
         .header(root_dir.join("vmxcodec.h").to_str().unwrap())
@@ -11,6 +11,8 @@ fn main() {
         .clang_arg("c++")
         .clang_arg("-std=c++17") // Ensure we use modern C++ standard
         .clang_arg("-fdeclspec") // Allow __declspec attributes
+        .clang_arg("-U_MSC_VER") // Avoid MSVC-only branches on gcc/clang
+        .clang_arg("-Wno-pragma-once-outside-header")
         .enable_cxx_namespaces() // Avoid name collisions
         .opaque_type("std::.*") // Treat STL types as opaque
         .allowlist_type("VMX_.*") // Whitelist VMX types to ensure they are generated
@@ -34,12 +36,20 @@ fn main() {
         //.file(root_dir.join("pch.cpp")) // Usually not needed if not using PCH in gcc/clang
         //.file(root_dir.join("dllmain.cpp")) // Windows specific usually
         .std("c++17") // Assuming C++17 or similar
-        .flag("-w"); // Silence noisy third-party warnings (libvmx)
+        .flag("-w") // Silence noisy third-party warnings (libvmx)
+        .flag_if_supported("-Wno-everything")
+        .flag_if_supported("-Wno-strict-aliasing")
+        .flag_if_supported("-Wno-sign-compare")
+        .flag_if_supported("-Wno-unused-variable")
+        .flag_if_supported("-Wno-unused-function")
+        .flag("-U_MSC_VER")
+        .warnings(false)
+        .extra_warnings(false);
 
     // Architecture specific flags and files
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    println!("cargo:warning=TARGET_ARCH={}", target_arch);
-    
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
+
     if target_arch == "x86_64" {
         build.flag("-mavx2");
         build.flag("-mfma"); // Often paired with AVX2
@@ -52,7 +62,6 @@ fn main() {
 
     // Handle OS specific includes if needed (e.g. windows vs linux)
     // For now assuming Mac/Linux environment from context.
-
 
     build.compile("vmxcodec");
 

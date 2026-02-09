@@ -1,3 +1,5 @@
+use crate::settings::Settings;
+use anyhow::Result;
 use axum::{
     extract::{Query, State},
     response::{Html, IntoResponse},
@@ -5,13 +7,11 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use std::process::Command;
 use std::fs;
-use anyhow::Result;
+use std::process::Command;
+use std::sync::Arc;
 use tokio::sync::watch;
-use crate::settings::Settings;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceSnapshot {
@@ -40,6 +40,11 @@ pub struct FramebufferInfoResponse {
     pub height: u32,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FramebufferNameResponse {
+    pub name: String,
+}
+
 #[derive(Clone)]
 pub struct WebState {
     pub settings: Arc<RwLock<Settings>>,
@@ -52,6 +57,7 @@ pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
         .route("/", get(handle_index))
         .route("/api/config", get(get_config).post(update_config))
         .route("/api/devices", get(get_devices))
+        .route("/api/fbname", get(get_fb_name))
         .route("/api/fbinfo", get(get_fb_info))
         .route("/api/status", get(get_status))
         .with_state(state);
@@ -74,8 +80,14 @@ async fn get_config(State(state): State<WebState>) -> Json<Settings> {
 
 async fn update_config(
     State(state): State<WebState>,
-    Json(new_settings): Json<Settings>,
+    Json(mut new_settings): Json<Settings>,
 ) -> Json<UpdateResult> {
+    let old_settings = {
+        let settings = state.settings.read().await;
+        settings.clone()
+    };
+
+    normalize_audio_mode(&mut new_settings);
     {
         let mut settings = state.settings.write().await;
         *settings = new_settings.clone();
@@ -86,11 +98,52 @@ async fn update_config(
             message: format!("Failed to save config: {}", e),
         });
     }
-    let _ = state.settings_tx.send(new_settings);
+    let _ = state.settings_tx.send(new_settings.clone());
+    let video_changed = !video_equals(&old_settings, &new_settings);
+    let web_changed = !web_equals(&old_settings, &new_settings);
+    let name_changed = old_settings.video.name != new_settings.video.name;
+
     Json(UpdateResult {
         ok: true,
-        message: "Settings updated successfully".to_string(),
+        message: build_update_message(video_changed, web_changed, name_changed),
     })
+}
+
+fn normalize_audio_mode(settings: &mut Settings) {
+    match settings.audio.mode.trim().to_ascii_lowercase().as_str() {
+        "hdmi" => settings.audio.trs_device.clear(),
+        "trs" => settings.audio.hdmi_device.clear(),
+        "none" => {
+            settings.audio.hdmi_device.clear();
+            settings.audio.trs_device.clear();
+        }
+        _ => {}
+    }
+}
+
+fn build_update_message(video_changed: bool, web_changed: bool, name_changed: bool) -> String {
+    if web_changed {
+        return "Saved. Web port changes require restart.".to_string();
+    }
+    if video_changed && name_changed {
+        return "Saved. Video updated. Source name change requires restart.".to_string();
+    }
+    "Saved. Changes applied.".to_string()
+}
+
+fn video_equals(left: &Settings, right: &Settings) -> bool {
+    left.video.name == right.video.name
+        && left.video.device_path == right.video.device_path
+        && left.video.width == right.video.width
+        && left.video.height == right.video.height
+        && left.video.frame_rate_n == right.video.frame_rate_n
+        && left.video.frame_rate_d == right.video.frame_rate_d
+        && left.video.codec == right.video.codec
+        && left.video.use_native_format == right.video.use_native_format
+}
+
+fn web_equals(left: &Settings, right: &Settings) -> bool {
+    left.web.enabled == right.web.enabled && left.web.port == right.web.port
 }
 
 async fn get_devices() -> Json<DeviceSnapshot> {
@@ -128,7 +181,25 @@ async fn get_fb_info(Query(query): Query<FbQuery>) -> impl IntoResponse {
         }
     }
 
-    Json(FramebufferInfoResponse { name, width, height })
+    Json(FramebufferInfoResponse {
+        name,
+        width,
+        height,
+    })
+}
+
+async fn get_fb_name(Query(query): Query<FbQuery>) -> impl IntoResponse {
+    let fb = query.path.split('/').last().unwrap_or_default();
+    let mut name = String::new();
+
+    if fb.starts_with("fb") {
+        let name_path = format!("/sys/class/graphics/{}/name", fb);
+        if let Ok(n) = fs::read_to_string(name_path) {
+            name = n.trim().to_string();
+        }
+    }
+
+    Json(FramebufferNameResponse { name })
 }
 
 async fn get_status() -> impl IntoResponse {

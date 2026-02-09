@@ -1,9 +1,9 @@
-use tokio::net::TcpStream;
-use futures::{SinkExt, StreamExt};
-use crate::frame::OMTFrame;
 use crate::channel::OMTChannel;
 use crate::codec::OMTFrameCodec;
+use crate::frame::OMTFrame;
+use futures::{SinkExt, StreamExt};
 use std::io;
+use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 pub struct OMTClient {

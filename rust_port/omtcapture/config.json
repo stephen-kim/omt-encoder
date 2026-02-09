@@ -7,11 +7,11 @@
     "frame_rate_n": 30,
     "frame_rate_d": 1,
     "codec": "YUY2",
-    "use_native_format": true
+    "use_native_format": false
   },
   "audio": {
     "mode": "hdmi",
-    "hdmi_device": "hw:0,0",
+    "hdmi_device": "plughw:0,0",
     "trs_device": "",
     "sample_rate": 48000,
     "channels": 2,

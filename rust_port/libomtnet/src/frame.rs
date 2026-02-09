@@ -1,5 +1,5 @@
-use bytes::{Buf, BufMut, Bytes};
 use crate::enums::OMTFrameType;
+use bytes::{Buf, BufMut, Bytes};
 use std::io;
 
 #[derive(Debug, Clone, Default)]
@@ -16,7 +16,10 @@ impl OMTFrameHeader {
 
     pub fn read(mut buf: impl Buf) -> Result<Self, io::Error> {
         if buf.remaining() < Self::SIZE {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes for header"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Not enough bytes for header",
+            ));
         }
         let version = buf.get_u8();
         let frame_type_val = buf.get_u8();
@@ -59,7 +62,10 @@ impl OMTVideoHeader {
 
     pub fn read(mut buf: impl Buf) -> Result<Self, io::Error> {
         if buf.remaining() < Self::SIZE {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes for video header"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Not enough bytes for video header",
+            ));
         }
         Ok(OMTVideoHeader {
             codec: buf.get_i32_le(),
@@ -100,7 +106,10 @@ impl OMTAudioHeader {
 
     pub fn read(mut buf: impl Buf) -> Result<Self, io::Error> {
         if buf.remaining() < Self::SIZE {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes for audio header"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Not enough bytes for audio header",
+            ));
         }
         Ok(OMTAudioHeader {
             codec: buf.get_i32_le(),
@@ -130,6 +139,8 @@ pub struct OMTFrame {
     pub audio_header: Option<OMTAudioHeader>,
     pub metadata: Bytes,
     pub data: Bytes, // The payload (metadata + actual data)
+    pub preview_mode: bool,
+    pub preview_data_length: Option<i32>,
 }
 
 impl OMTFrame {
@@ -143,6 +154,8 @@ impl OMTFrame {
             audio_header: None,
             metadata: Bytes::new(),
             data: Bytes::new(),
+            preview_mode: false,
+            preview_data_length: None,
         };
         frame.update_data_length();
         frame
@@ -164,8 +177,8 @@ impl OMTFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enums::{OMTCodec, OMTColorSpace, OMTVideoFlags};
     use bytes::BytesMut;
-    use crate::enums::{OMTCodec, OMTVideoFlags, OMTColorSpace};
 
     #[test]
     fn test_header_serialization() {
@@ -177,7 +190,7 @@ mod tests {
 
         let mut buf = BytesMut::with_capacity(OMTFrameHeader::SIZE);
         header.write(&mut buf);
-        
+
         let mut read_buf = buf.freeze();
         let read_header = OMTFrameHeader::read(&mut read_buf).unwrap();
 

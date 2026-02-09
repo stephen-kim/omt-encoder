@@ -70,7 +70,12 @@ fn build_instance_name(hostname: &str, source_name: &str) -> String {
         let name_len = name.chars().count();
         if oversize < name_len {
             let new_len = name_len - oversize;
-            name = name.chars().take(new_len).collect::<String>().trim_end().to_string();
+            name = name
+                .chars()
+                .take(new_len)
+                .collect::<String>()
+                .trim_end()
+                .to_string();
             full = format!("{} ({})", hostname, name);
         }
     }
