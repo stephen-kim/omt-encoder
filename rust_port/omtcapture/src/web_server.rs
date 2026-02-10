@@ -160,6 +160,12 @@ fn merge_empty_fields(old: &Settings, new: &mut Settings) {
     if new.preview.output_devices.is_empty() && !old.preview.output_devices.is_empty() {
         new.preview.output_devices = old.preview.output_devices.clone();
     }
+    if new.preview.fps == 0 {
+        new.preview.fps = old.preview.fps;
+    }
+    if new.preview.pixel_format.trim().is_empty() {
+        new.preview.pixel_format = old.preview.pixel_format.clone();
+    }
 
     // Audio: allow intentional disable via mode=none, but otherwise keep device strings.
     let mode = new.audio.mode.trim().to_ascii_lowercase();
@@ -197,6 +203,11 @@ fn merge_empty_fields(old: &Settings, new: &mut Settings) {
     }
     if !new.audio.monitor.gain.is_finite() {
         new.audio.monitor.gain = old.audio.monitor.gain;
+    }
+
+    // Web: never allow port 0 from empty inputs.
+    if new.web.port == 0 {
+        new.web.port = old.web.port;
     }
 }
 

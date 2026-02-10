@@ -9,6 +9,9 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, watch, Mutex};
 
+const NETWORK_SEND_BUFFER: usize = 64 * 1024;
+const NETWORK_RECEIVE_BUFFER: usize = 8 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct ServerSenders {
     pub video: broadcast::Sender<OMTFrame>,
@@ -154,9 +157,16 @@ async fn handle_connection(
     suggested_quality_hint: Arc<AtomicU8>,
     conn_id: u64,
 ) -> Result<(), io::Error> {
-    // Configure socket buffers
-    // Note: OMT logic sets specific buffer sizes
-    // We can rely on OS defaults or set them if critical via socket2 crate or implicit behavior.
+    // Match C# sender behavior: low kernel-side buffering + no Nagle to avoid multi-second latency.
+    // If the receiver can't keep up we prefer dropping (latest-wins) over building delay.
+    let _ = socket.set_nodelay(true);
+    {
+        use socket2::SockRef;
+        let sock = SockRef::from(&socket);
+        let _ = sock.set_send_buffer_size(NETWORK_SEND_BUFFER);
+        let _ = sock.set_recv_buffer_size(NETWORK_RECEIVE_BUFFER);
+        let _ = sock.set_keepalive(true);
+    }
 
     let channel = OMTChannel::new(socket);
     let mut rx_video = tx.video.subscribe();

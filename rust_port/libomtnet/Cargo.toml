@@ -12,3 +12,4 @@ tokio-util = { version = "0.7.18", features = ["codec"] }
 futures = "0.3.31"
 serde = { version = "1.0.228", features = ["derive"] }
 libc = "0.2"
+socket2 = "0.5"
