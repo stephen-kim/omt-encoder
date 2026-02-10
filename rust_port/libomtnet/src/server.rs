@@ -213,7 +213,7 @@ async fn handle_connection(
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint).await;
 
-    // Low-latency send model (matches C# spirit):
+    // Low-latency send model (matches C# sender behavior):
     // - Video is "latest-wins" (no queueing): if the connection can't keep up, we prefer the newest
     //   frame over building latency.
     // - Audio/metadata are queued with a small bound; if full, we drop to avoid runaway latency.
@@ -224,16 +224,16 @@ async fn handle_connection(
     let prod_state = Arc::clone(&state);
     let producer = tokio::spawn(async move {
         loop {
-            let (want_video, want_audio) = {
+            let (want_video, want_audio, want_meta) = {
                 let st = prod_state.lock().await;
-                (st.wants_video, st.wants_audio)
+                (st.wants_video, st.wants_audio, st.wants_metadata)
             };
 
             let frame = tokio::select! {
                 v = rx_video.recv(), if want_video => v,
                 a = rx_audio.recv(), if want_audio => a,
-                // Match C#: metadata is not gated by subscriptions (used for tally/info/redirect).
-                m = rx_meta.recv() => m,
+                // Match C#: metadata is only sent to connections that subscribed to metadata.
+                m = rx_meta.recv(), if want_meta => m,
             };
             let frame = match frame {
                 Ok(frame) => frame,
@@ -247,7 +247,7 @@ async fn handle_connection(
             let allowed = {
                 let st = prod_state.lock().await;
                 match frame.header.frame_type {
-                    OMTFrameType::Metadata => true,
+                    OMTFrameType::Metadata => st.wants_metadata,
                     OMTFrameType::Video => st.wants_video,
                     OMTFrameType::Audio => st.wants_audio,
                     _ => false,
