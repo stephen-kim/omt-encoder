@@ -436,7 +436,7 @@ mod linux {
             };
 
             let mut frame = OMTFrame::new(OMTFrameType::Video);
-            frame.header.timestamp = monotonic_100ns();
+            frame.header.timestamp = crate::timebase::monotonic_100ns();
             frame.video_header = Some(OMTVideoHeader {
                 codec: network_codec as i32,
                 width: frame_width as i32,
@@ -715,12 +715,6 @@ mod linux {
             OMTCodec::P216 => pixels * 4,
             _ => pixels * 2,
         }
-    }
-
-    fn monotonic_100ns() -> i64 {
-        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-        let start = START.get_or_init(Instant::now);
-        (start.elapsed().as_nanos() / 100) as i64
     }
 
     fn build_preview_sinks(

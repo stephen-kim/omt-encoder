@@ -11,7 +11,8 @@ use libomtnet::OMTFrame;
 
 struct Queues {
     audio: VecDeque<OMTFrame>,
-    video: VecDeque<OMTFrame>,
+    // Latest-wins: video should never build latency. Keep only the newest frame.
+    video_latest: Option<OMTFrame>,
 }
 
 // If both audio and video are queued, don't let audio fully starve video.
@@ -45,11 +46,10 @@ pub struct SendCoordinator {
 impl SendCoordinator {
     pub fn new(tx: ServerSenders, settings: SendSettings) -> Self {
         let audio_capacity = clamp(settings.audio_queue_capacity, 1, 16);
-        let video_capacity = clamp(settings.video_queue_capacity, 1, 8);
         let inner = Arc::new(Inner {
             queues: Mutex::new(Queues {
                 audio: VecDeque::with_capacity(audio_capacity),
-                video: VecDeque::with_capacity(video_capacity),
+                video_latest: None,
             }),
             stats: Mutex::new(SendStats::default()),
             cv: Condvar::new(),
@@ -57,7 +57,8 @@ impl SendCoordinator {
             tx,
             settings: SendSettings {
                 audio_queue_capacity: audio_capacity,
-                video_queue_capacity: video_capacity,
+                // Keep the setting but sender uses latest-wins semantics regardless.
+                video_queue_capacity: clamp(settings.video_queue_capacity, 1, 8),
                 force_zero_timestamps: settings.force_zero_timestamps,
             },
         });
@@ -80,25 +81,24 @@ impl SendCoordinator {
 
     fn enqueue(&self, frame: OMTFrame, is_audio: bool) -> bool {
         let mut guard = self.inner.queues.lock().unwrap();
-        let queue = if is_audio {
-            &mut guard.audio
-        } else {
-            &mut guard.video
-        };
-        let capacity = if is_audio {
-            self.inner.settings.audio_queue_capacity
-        } else {
-            self.inner.settings.video_queue_capacity
-        };
+        if !is_audio {
+            // Replace the previous unsent frame to avoid building delay.
+            if guard.video_latest.is_some() {
+                let mut stats = self.inner.stats.lock().unwrap();
+                stats.video_dropped += 1;
+            }
+            guard.video_latest = Some(frame);
+            self.inner.cv.notify_one();
+            return true;
+        }
+
+        let queue = &mut guard.audio;
+        let capacity = self.inner.settings.audio_queue_capacity;
 
         while queue.len() >= capacity {
             queue.pop_front();
             let mut stats = self.inner.stats.lock().unwrap();
-            if is_audio {
-                stats.audio_dropped += 1;
-            } else {
-                stats.video_dropped += 1;
-            }
+            stats.audio_dropped += 1;
         }
         queue.push_back(frame);
         self.inner.cv.notify_one();
@@ -120,7 +120,7 @@ fn run_send_loop(inner: Arc<Inner>) {
         let mut is_audio = false;
         {
             let mut guard = inner.queues.lock().unwrap();
-            if guard.audio.is_empty() && guard.video.is_empty() {
+            if guard.audio.is_empty() && guard.video_latest.is_none() {
                 guard = inner
                     .cv
                     .wait_timeout(guard, Duration::from_millis(10))
@@ -129,11 +129,11 @@ fn run_send_loop(inner: Arc<Inner>) {
             }
 
             let has_audio = !guard.audio.is_empty();
-            let has_video = !guard.video.is_empty();
+            let has_video = guard.video_latest.is_some();
 
             // If video is waiting and we've sent a burst of audio frames, force a video frame out.
             if has_video && (!has_audio || audio_budget == 0) {
-                if let Some(frame) = guard.video.pop_front() {
+                if let Some(frame) = guard.video_latest.take() {
                     next_frame = Some(frame);
                     audio_budget = AUDIO_BURST_BEFORE_VIDEO;
                 }
@@ -143,17 +143,17 @@ fn run_send_loop(inner: Arc<Inner>) {
                     is_audio = true;
                     audio_budget = audio_budget.saturating_sub(1);
                 }
-            } else if let Some(frame) = guard.video.pop_front() {
+            } else if let Some(frame) = guard.video_latest.take() {
                 next_frame = Some(frame);
                 audio_budget = AUDIO_BURST_BEFORE_VIDEO;
             }
         }
 
         if let Some(mut frame) = next_frame {
+            // Keep capture timestamps as produced by the audio/video pipelines.
+            // Optionally force zero timestamps for debugging.
             if inner.settings.force_zero_timestamps {
                 frame.header.timestamp = 0;
-            } else {
-                frame.header.timestamp = monotonic_timestamp_100ns();
             }
             let send_result = if is_audio {
                 inner.tx.audio.send(frame)
@@ -208,10 +208,4 @@ fn log_stats(inner: &Arc<Inner>) {
 
 fn clamp(value: usize, min: usize, max: usize) -> usize {
     value.clamp(min, max)
-}
-
-fn monotonic_timestamp_100ns() -> i64 {
-    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    let start = START.get_or_init(Instant::now);
-    (start.elapsed().as_nanos() / 100) as i64
 }

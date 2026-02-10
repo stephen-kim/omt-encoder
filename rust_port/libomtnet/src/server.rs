@@ -320,7 +320,7 @@ async fn handle_connection(
     while let Some(result) = stream.next().await {
         match result {
             Ok(frame) => {
-                handle_subscription_frame(&frame, &state).await;
+                handle_subscription_frame(conn_id, &frame, &state).await;
                 sync_connection_suggested_quality(
                     conn_id,
                     &state,
@@ -347,33 +347,37 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn handle_subscription_frame(frame: &OMTFrame, state: &Arc<Mutex<SubscriptionState>>) {
+async fn handle_subscription_frame(
+    conn_id: u64,
+    frame: &OMTFrame,
+    state: &Arc<Mutex<SubscriptionState>>,
+) {
     if let Some(xml) = extract_metadata_xml(frame) {
         // Fast path for exact protocol constants used by C# sender/receiver.
         // These are compared by exact string in the original implementation.
         match xml.as_str() {
             "<OMTSubscribe Video=\"true\" />" => {
-                println!("Client subscribed: video");
+                println!("[conn {conn_id}] Client subscribed: video");
                 state.lock().await.wants_video = true;
                 return;
             }
             "<OMTSubscribe Audio=\"true\" />" => {
-                println!("Client subscribed: audio");
+                println!("[conn {conn_id}] Client subscribed: audio");
                 state.lock().await.wants_audio = true;
                 return;
             }
             "<OMTSubscribe Metadata=\"true\" />" => {
-                println!("Client subscribed: metadata");
+                println!("[conn {conn_id}] Client subscribed: metadata");
                 state.lock().await.wants_metadata = true;
                 return;
             }
             "<OMTSettings Preview=\"true\" />" => {
-                println!("Client settings: preview=true");
+                println!("[conn {conn_id}] Client settings: preview=true");
                 state.lock().await.preview = true;
                 return;
             }
             "<OMTSettings Preview=\"false\" />" => {
-                println!("Client settings: preview=false");
+                println!("[conn {conn_id}] Client settings: preview=false");
                 state.lock().await.preview = false;
                 return;
             }
@@ -409,15 +413,15 @@ async fn handle_subscription_frame(frame: &OMTFrame, state: &Arc<Mutex<Subscript
                 "omtsubscribe" => {
                     let mut st = state.lock().await;
                     if attr_true(&attrs, "Video") {
-                        println!("Client subscribed: video");
+                        println!("[conn {conn_id}] Client subscribed: video");
                         st.wants_video = true;
                     }
                     if attr_true(&attrs, "Audio") {
-                        println!("Client subscribed: audio");
+                        println!("[conn {conn_id}] Client subscribed: audio");
                         st.wants_audio = true;
                     }
                     if attr_true(&attrs, "Metadata") {
-                        println!("Client subscribed: metadata");
+                        println!("[conn {conn_id}] Client subscribed: metadata");
                         st.wants_metadata = true;
                     }
                     return;
@@ -425,12 +429,12 @@ async fn handle_subscription_frame(frame: &OMTFrame, state: &Arc<Mutex<Subscript
                 "omtsettings" => {
                     let mut st = state.lock().await;
                     if let Some(v) = attr_get(&attrs, "Preview") {
-                        println!("Client settings: preview={}", v);
+                        println!("[conn {conn_id}] Client settings: preview={}", v);
                         st.preview = is_true(v);
                         return;
                     }
                     if let Some(v) = attr_get(&attrs, "Quality") {
-                        println!("Client settings: quality={}", v);
+                        println!("[conn {conn_id}] Client settings: quality={}", v);
                         st.suggested_quality = Some(v.clone());
                         return;
                     }

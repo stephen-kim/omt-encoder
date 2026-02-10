@@ -101,7 +101,8 @@ impl Default for SendSettings {
         Self {
             audio_queue_capacity: 8,
             video_queue_capacity: 1,
-            force_zero_timestamps: true,
+            // Real-time A/V sync depends on timestamps; keep them enabled by default.
+            force_zero_timestamps: false,
         }
     }
 }

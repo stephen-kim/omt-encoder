@@ -88,11 +88,11 @@ async fn update_config(
     };
 
     normalize_audio_mode(&mut new_settings);
-    clamp_send_settings(&mut new_settings);
     // Defensive merge: the browser UI can submit empty strings for selects/inputs
     // (e.g. when toggling checkboxes disables sections). Avoid nuking critical fields
     // and accidentally stopping unrelated pipelines.
     merge_empty_fields(&old_settings, &mut new_settings);
+    clamp_send_settings(&mut new_settings);
     {
         let mut settings = state.settings.write().await;
         *settings = new_settings.clone();
@@ -195,6 +195,14 @@ fn merge_empty_fields(old: &Settings, new: &mut Settings) {
     }
     if new.audio.arecord_period_usec == 0 {
         new.audio.arecord_period_usec = old.audio.arecord_period_usec;
+    }
+
+    // Send: if UI omits these or sends 0 while toggling unrelated controls, keep previous values.
+    if new.send.audio_queue_capacity == 0 {
+        new.send.audio_queue_capacity = old.send.audio_queue_capacity;
+    }
+    if new.send.video_queue_capacity == 0 {
+        new.send.video_queue_capacity = old.send.video_queue_capacity;
     }
 
     // Monitor settings

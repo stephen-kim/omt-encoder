@@ -75,7 +75,7 @@ mod linux {
     use bytes::BufMut;
     use libomtnet::{OMTFrame, OMTFrameType};
     use std::fmt;
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::Instant;
 
     #[derive(Clone, Copy, Debug)]
     enum SampleFormat {
@@ -400,11 +400,8 @@ mod linux {
         sample_rate: u32,
     ) {
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        frame.header.timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as i64
-            / 100;
+        // Keep audio/video in the same monotonic timebase (100ns units) to avoid receiver buffering.
+        frame.header.timestamp = crate::timebase::monotonic_100ns();
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,

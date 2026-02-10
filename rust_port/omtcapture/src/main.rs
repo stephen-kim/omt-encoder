@@ -2,6 +2,7 @@ mod audio_pipeline;
 mod discovery;
 mod send_coordinator;
 mod settings;
+mod timebase;
 mod video_pipeline;
 mod web_server;
 

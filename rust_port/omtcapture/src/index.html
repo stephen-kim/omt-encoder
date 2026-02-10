@@ -422,7 +422,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
         <input id="sendForceZeroTimestamps" type="checkbox" />
         <label for="sendForceZeroTimestamps">Force zero timestamps</label>
       </div>
-      <div class="help">Reduces receiver buffering. Can break strict A/V sync in some players.</div>
+      <div class="help">Debug only. Setting timestamps to 0 can cause receivers to buffer heavily or fail A/V sync.</div>
     </div>
 
     <div class="card">
@@ -768,19 +768,61 @@ async function saveConfig() {
     payload.video.codec = document.getElementById('videoCodec').value;
   }
 
+  // Audio device selection is two checkboxes max, but order is not meaningful.
+  // Preserve hdmi/trs mapping when possible to avoid swapping devices and breaking capture.
   const selectedInputs = getAudioInputSelection().slice(0, 2);
-  if (selectedInputs.length === 0) {
+  let newHdmi = (payload.audio.hdmi_device || '').trim();
+  let newTrs = (payload.audio.trs_device || '').trim();
+  let hdmiOn = false;
+  let trsOn = false;
+
+  // First, mark existing assignments if they are selected.
+  for (const val of selectedInputs) {
+    if (val === newHdmi) hdmiOn = true;
+    if (val === newTrs) trsOn = true;
+  }
+
+  // Then, assign any newly-selected devices into empty/unselected slots.
+  for (const val of selectedInputs) {
+    if (val === newHdmi || val === newTrs) continue;
+
+    // If user selected only one device and it doesn't match current mapping, treat it as HDMI-only.
+    if (selectedInputs.length === 1) {
+      newHdmi = val;
+      hdmiOn = true;
+      newTrs = '';
+      trsOn = false;
+      break;
+    }
+
+    if (!hdmiOn) {
+      newHdmi = val;
+      hdmiOn = true;
+      continue;
+    }
+    if (!trsOn) {
+      newTrs = val;
+      trsOn = true;
+      continue;
+    }
+  }
+
+  if (!hdmiOn && !trsOn) {
     payload.audio.mode = 'none';
     payload.audio.hdmi_device = '';
     payload.audio.trs_device = '';
-  } else if (selectedInputs.length === 1) {
+  } else if (hdmiOn && !trsOn) {
     payload.audio.mode = 'hdmi';
-    payload.audio.hdmi_device = selectedInputs[0];
+    payload.audio.hdmi_device = newHdmi;
     payload.audio.trs_device = '';
+  } else if (!hdmiOn && trsOn) {
+    payload.audio.mode = 'trs';
+    payload.audio.hdmi_device = '';
+    payload.audio.trs_device = newTrs;
   } else {
     payload.audio.mode = 'both';
-    payload.audio.hdmi_device = selectedInputs[0];
-    payload.audio.trs_device = selectedInputs[1];
+    payload.audio.hdmi_device = newHdmi;
+    payload.audio.trs_device = newTrs;
   }
   payload.audio.sample_rate = Number(document.getElementById('audioSampleRate').value);
   payload.audio.channels = Number(document.getElementById('audioChannels').value);
