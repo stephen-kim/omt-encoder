@@ -11,8 +11,7 @@ use libomtnet::OMTFrame;
 
 struct Queues {
     audio: VecDeque<OMTFrame>,
-    // Latest-wins: video should never build latency. Keep only the newest frame.
-    video_latest: Option<OMTFrame>,
+    video: VecDeque<OMTFrame>,
 }
 
 // If both audio and video are queued, don't let audio fully starve video.
@@ -41,10 +40,11 @@ pub struct SendCoordinator {
 impl SendCoordinator {
     pub fn new(tx: ServerSenders, settings: SendSettings) -> Self {
         let audio_capacity = clamp(settings.audio_queue_capacity, 1, 16);
+        let video_capacity = clamp(settings.video_queue_capacity, 1, 8);
         let inner = Arc::new(Inner {
             queues: Mutex::new(Queues {
                 audio: VecDeque::with_capacity(audio_capacity),
-                video_latest: None,
+                video: VecDeque::with_capacity(video_capacity),
             }),
             audio_dropped: AtomicUsize::new(0),
             video_dropped: AtomicUsize::new(0),
@@ -80,11 +80,17 @@ impl SendCoordinator {
     fn enqueue(&self, frame: OMTFrame, is_audio: bool) -> bool {
         let mut guard = self.inner.queues.lock().unwrap();
         if !is_audio {
-            // Replace the previous unsent frame to avoid building delay.
-            if guard.video_latest.is_some() {
-                self.inner.video_dropped.fetch_add(1, Ordering::Relaxed);
+            let queue = &mut guard.video;
+            let capacity = self.inner.settings.video_queue_capacity;
+            let mut dropped = 0usize;
+            while queue.len() >= capacity {
+                queue.pop_front();
+                dropped += 1;
             }
-            guard.video_latest = Some(frame);
+            if dropped > 0 {
+                self.inner.video_dropped.fetch_add(dropped, Ordering::Relaxed);
+            }
+            queue.push_back(frame);
             self.inner.cv.notify_one();
             return true;
         }
@@ -123,7 +129,7 @@ fn run_send_loop(inner: Arc<Inner>) {
         let mut is_audio = false;
         {
             let mut guard = inner.queues.lock().unwrap();
-            if guard.audio.is_empty() && guard.video_latest.is_none() {
+            if guard.audio.is_empty() && guard.video.is_empty() {
                 guard = inner
                     .cv
                     .wait_timeout(guard, Duration::from_millis(10))
@@ -132,11 +138,10 @@ fn run_send_loop(inner: Arc<Inner>) {
             }
 
             let has_audio = !guard.audio.is_empty();
-            let has_video = guard.video_latest.is_some();
+            let has_video = !guard.video.is_empty();
 
-            // If video is waiting and we've sent a burst of audio frames, force a video frame out.
             if has_video && (!has_audio || audio_budget == 0) {
-                if let Some(frame) = guard.video_latest.take() {
+                if let Some(frame) = guard.video.pop_front() {
                     next_frame = Some(frame);
                     audio_budget = AUDIO_BURST_BEFORE_VIDEO;
                 }
@@ -146,7 +151,7 @@ fn run_send_loop(inner: Arc<Inner>) {
                     is_audio = true;
                     audio_budget = audio_budget.saturating_sub(1);
                 }
-            } else if let Some(frame) = guard.video_latest.take() {
+            } else if let Some(frame) = guard.video.pop_front() {
                 next_frame = Some(frame);
                 audio_budget = AUDIO_BURST_BEFORE_VIDEO;
             }
