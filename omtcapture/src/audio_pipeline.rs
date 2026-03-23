@@ -990,13 +990,21 @@ mod linux {
         // Clear to silence so partial reads don't leak old samples.
         buffer.fill(0.0);
 
+        // Ensure the PCM is running before waiting for data.
+        match input.pcm.state() {
+            State::XRun | State::Suspended => {
+                let _ = input.pcm.prepare();
+                let _ = input.pcm.start();
+            }
+            State::Prepared | State::Setup => {
+                let _ = input.pcm.start();
+            }
+            _ => {}
+        }
+
         // Wait for data to be ready (up to 50ms). This avoids busy-looping on EAGAIN
         // while still recovering quickly if a device disconnects.
-        if matches!(input.pcm.state(), State::XRun | State::Suspended) {
-            let _ = input.pcm.prepare();
-        }
         if !input.pcm.wait(Some(50))? {
-            // Timeout: no data available within 50ms.
             return Ok(0);
         }
 
