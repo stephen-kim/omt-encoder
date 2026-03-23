@@ -42,20 +42,22 @@ impl VideoPipeline {
         self.running
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let running = self.running.clone();
-        let settings = self.settings.clone();
-        let preview = self.preview.clone();
-        let restart_requested = self.restart_requested.clone();
-        let preview_restart_requested = self.preview_restart_requested.clone();
         let send = self.send.clone();
         let suggested_quality_hint = self.suggested_quality_hint.clone();
+
+        #[cfg(target_os = "linux")]
+        let settings = self.settings.clone();
+        #[cfg(target_os = "linux")]
+        let preview = self.preview.clone();
+        #[cfg(target_os = "linux")]
+        let restart_requested = self.restart_requested.clone();
+        #[cfg(target_os = "linux")]
+        let preview_restart_requested = self.preview_restart_requested.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
             #[cfg(target_os = "linux")]
             {
-                // Match the C# sender behavior: keep trying to (re)start capture on transient
-                // V4L2 errors or format changes instead of exiting permanently.
                 while running.load(std::sync::atomic::Ordering::SeqCst) {
-                    // Pull the latest settings at the top of each (re)start.
                     let current_settings = settings.blocking_read().clone();
                     linux::run_video_loop(
                         running.clone(),
@@ -342,7 +344,7 @@ mod linux {
         let encode_codec = effective_output_codec;
         let encode_width = effective_output_width;
         let encode_height = effective_output_height;
-        let encode_stride = if transform.is_some() {
+        let _encode_stride = if transform.is_some() {
             codec_stride(encode_codec, encode_width)
         } else {
             fmt.stride

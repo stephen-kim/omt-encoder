@@ -123,18 +123,7 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
         // 1. Write Header
         // We'll finalize header lengths after deciding how much payload will be sent.
 
-        // 2. Write Extended Header
-        if let Some(ref vh) = wire_video_header {
-            if wire_header.frame_type == OMTFrameType::Video {
-                // defer until after header write
-            }
-        } else if let Some(ref ah) = item.audio_header {
-            if wire_header.frame_type == OMTFrameType::Audio {
-                // defer until after header write
-            }
-        }
-
-        // 3. Write Data + Metadata (metadata goes last per OMT protocol)
+        // 2. Write Data + Metadata (metadata goes last per OMT protocol)
         // Respect preview data length by truncating payload bytes when requested.
         let payload_target = (wire_header.data_length - ext_len).max(0) as usize;
         let send_payload = payload_target.min(total_payload);
