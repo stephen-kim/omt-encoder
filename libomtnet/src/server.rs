@@ -33,8 +33,8 @@ impl OMTServer {
         // Keep sender-side buffering small to avoid multi-second latency.
         // IMPORTANT: video/audio are sent on separate TCP connections by the receiver, so
         // separating channels lets us tune buffering independently.
-        let (tx_video, _) = broadcast::channel(4); // ~133ms at 30fps
-        let (tx_audio, _) = broadcast::channel(64); // tolerate short stalls without big delay
+        let (tx_video, _) = broadcast::channel(8);
+        let (tx_audio, _) = broadcast::channel(256); // large buffer to absorb TCP backpressure
         let (tx_meta, _) = broadcast::channel(64);
 
         Ok(OMTServer {
