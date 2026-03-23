@@ -125,12 +125,35 @@ impl Default for WebSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct PreviewOutputSettings {
+    pub device: String,
+    pub fps: u32,
+    pub pixel_format: String,
+}
+
+impl Default for PreviewOutputSettings {
+    fn default() -> Self {
+        Self {
+            device: String::new(),
+            fps: 0,
+            pixel_format: "rgb565le".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PreviewSettings {
     pub enabled: bool,
+    /// Legacy single-output field (used if outputs is empty).
     pub output_device: String,
+    /// Legacy multi-output field (used if outputs is empty).
     pub output_devices: Vec<String>,
+    /// Per-output settings with individual fps/format. Preferred over output_device(s).
+    pub outputs: Vec<PreviewOutputSettings>,
     pub width: u32,
     pub height: u32,
+    /// Default fps for legacy output_device(s) entries.
     pub fps: u32,
     pub pixel_format: String,
 }
@@ -139,8 +162,9 @@ impl Default for PreviewSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            output_device: "".to_string(),
+            output_device: String::new(),
             output_devices: Vec::new(),
+            outputs: Vec::new(),
             width: 1920,
             height: 1080,
             fps: 30,

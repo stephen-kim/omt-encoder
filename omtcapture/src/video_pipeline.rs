@@ -966,6 +966,12 @@ mod linux {
         }
     }
 
+    struct ResolvedOutput {
+        device: String,
+        fps: u32,
+        pixel_format: String,
+    }
+
     fn build_preview_sinks(
         settings: &VideoSettings,
         preview: &PreviewSettings,
@@ -977,10 +983,35 @@ mod linux {
             return Vec::new();
         }
 
-        let mut outputs = preview.output_devices.clone();
-        if outputs.is_empty() && !preview.output_device.is_empty() {
-            outputs.push(preview.output_device.clone());
-        }
+        // Resolve output list: prefer per-output `outputs` array, fall back to legacy fields.
+        let resolved: Vec<ResolvedOutput> = if !preview.outputs.is_empty() {
+            preview
+                .outputs
+                .iter()
+                .filter(|o| !o.device.trim().is_empty())
+                .map(|o| ResolvedOutput {
+                    device: o.device.clone(),
+                    fps: o.fps,
+                    pixel_format: if o.pixel_format.trim().is_empty() {
+                        preview.pixel_format.clone()
+                    } else {
+                        o.pixel_format.clone()
+                    },
+                })
+                .collect()
+        } else {
+            let mut devs = preview.output_devices.clone();
+            if devs.is_empty() && !preview.output_device.is_empty() {
+                devs.push(preview.output_device.clone());
+            }
+            devs.into_iter()
+                .map(|d| ResolvedOutput {
+                    device: d,
+                    fps: preview.fps,
+                    pixel_format: preview.pixel_format.clone(),
+                })
+                .collect()
+        };
 
         let fourcc_str = std::str::from_utf8(&input_fourcc.repr).unwrap_or("YUYV");
         let pix_fmt = match fourcc_str {
@@ -995,21 +1026,21 @@ mod linux {
             },
         };
 
-        let interval_ms = if preview.fps == 0 {
-            0
-        } else {
-            1000 / preview.fps as u64
-        };
         let mut sinks = Vec::new();
-
         let mut seen = HashSet::new();
-        for output in outputs {
-            if !seen.insert(output.clone()) {
+
+        for out in resolved {
+            if !seen.insert(out.device.clone()) {
                 continue;
             }
 
-            let input_rate = if preview.fps > 0 {
-                preview.fps.to_string()
+            let interval_ms = if out.fps == 0 {
+                0
+            } else {
+                1000 / out.fps.max(1) as u64
+            };
+            let input_rate = if out.fps > 0 {
+                out.fps.to_string()
             } else if settings.frame_rate_d == 0 {
                 "30".to_string()
             } else {
@@ -1020,7 +1051,7 @@ mod linux {
                 )
             };
             let (tx, rx) = mpsc::sync_channel::<Bytes>(1);
-            let (preview_width, preview_height) = try_get_framebuffer_size(&output)
+            let (preview_width, preview_height) = try_get_framebuffer_size(&out.device)
                 .or_else(|| {
                     if preview.width > 0 && preview.height > 0 {
                         Some((preview.width, preview.height))
@@ -1030,19 +1061,26 @@ mod linux {
                 })
                 .unwrap_or((input_width, input_height));
 
+            let fmt = if out.pixel_format.trim().is_empty() {
+                "rgb565le".to_string()
+            } else {
+                out.pixel_format.clone()
+            };
+
+            println!(
+                "Preview output: {} ({}x{} @ {}fps, {})",
+                out.device, preview_width, preview_height, input_rate, fmt
+            );
+
             let sink = PreviewSink {
-                output: output.clone(),
+                output: out.device,
                 pix_fmt: pix_fmt.to_string(),
-                input_rate: input_rate.clone(),
+                input_rate,
                 input_width,
                 input_height,
                 preview_width,
                 preview_height,
-                preview_format: if preview.pixel_format.trim().is_empty() {
-                    "rgb565le".to_string()
-                } else {
-                    preview.pixel_format.clone()
-                },
+                preview_format: fmt,
                 last_sent: Instant::now(),
                 interval_ms,
                 tx: Some(tx),
