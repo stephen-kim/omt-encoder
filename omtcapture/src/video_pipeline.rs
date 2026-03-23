@@ -1228,15 +1228,14 @@ mod linux {
                         continue;
                     }
                 }
-                // For fbdev: read scaled frame from ffmpeg stdout and write to fb via mmap.
-                // fbtft uses deferred_io: only mmap writes (+ flush) trigger SPI refresh.
+                // For fbdev: read scaled frame from ffmpeg stdout and write to fb.
                 if is_fbdev {
                     if let Some(stdout) = ffmpeg_stdout.as_mut() {
                         if read_exact(stdout, &mut fb_buf) {
-                            if let Some(mm) = fb_mmap.as_mut() {
-                                let len = fb_buf.len().min(mm.len());
-                                mm[..len].copy_from_slice(&fb_buf[..len]);
-                                let _ = mm.flush();
+                            if let Some(fb) = fb_file.as_mut() {
+                                use std::io::Seek;
+                                let _ = fb.seek(std::io::SeekFrom::Start(0));
+                                let _ = fb.write_all(&fb_buf);
                             }
                         }
                     }
