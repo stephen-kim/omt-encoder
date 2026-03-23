@@ -1111,45 +1111,32 @@ mod linux {
         let is_fbdev = output.starts_with("/dev/fb");
 
         let handle = std::thread::spawn(move || {
-            let mut child: Option<Child> = None;
-            let mut ffmpeg_stdin: Option<ChildStdin> = None;
-            let mut ffmpeg_stdout: Option<ChildStdout> = None;
-            let mut fb_file: Option<std::fs::File> = None;
-            let frame_bytes = preview_width as usize * preview_height as usize * 2; // 16bpp
-            let mut fb_buf = vec![0u8; frame_bytes];
-            // mmap for fbtft deferred_io: write() doesn't trigger SPI refresh, mmap+msync does.
-            let mut fb_mmap: Option<memmap2::MmapMut> = None;
+            let vf = if rotate == 1 {
+                format!(
+                    "scale={}:{}:flags=fast_bilinear,transpose=1,format={}",
+                    preview_height, preview_width, preview_format
+                )
+            } else if rotate == 2 {
+                format!(
+                    "scale={}:{}:flags=fast_bilinear,transpose=2,format={}",
+                    preview_height, preview_width, preview_format
+                )
+            } else if rotate == 3 {
+                format!(
+                    "scale={}:{}:flags=fast_bilinear,transpose=1,transpose=1,format={}",
+                    preview_width, preview_height, preview_format
+                )
+            } else {
+                format!(
+                    "scale={}:{}:flags=fast_bilinear,format={}",
+                    preview_width, preview_height, preview_format
+                )
+            };
+            let frame_bytes = preview_width as usize * preview_height as usize * 2;
 
-            let start_ffmpeg = |child: &mut Option<Child>,
-                                ffmpeg_stdin: &mut Option<ChildStdin>,
-                                ffmpeg_stdout: &mut Option<ChildStdout>,
-                                fb_file: &mut Option<std::fs::File>,
-                                fb_mmap: &mut Option<memmap2::MmapMut>|
-             -> Result<(), ()> {
+            // Outer loop: restart ffmpeg on failure.
+            loop {
                 let mut cmd = Command::new("ffmpeg");
-                // Build the video filter chain: scale + optional rotation + format.
-                // transpose: 1=90°CW, 2=90°CCW, 3=180° (requires two transposes)
-                let vf = if rotate == 1 {
-                    format!(
-                        "scale={}:{}:flags=fast_bilinear,transpose=1,format={}",
-                        preview_height, preview_width, preview_format
-                    )
-                } else if rotate == 2 {
-                    format!(
-                        "scale={}:{}:flags=fast_bilinear,transpose=2,format={}",
-                        preview_height, preview_width, preview_format
-                    )
-                } else if rotate == 3 {
-                    format!(
-                        "scale={}:{}:flags=fast_bilinear,transpose=1,transpose=1,format={}",
-                        preview_width, preview_height, preview_format
-                    )
-                } else {
-                    format!(
-                        "scale={}:{}:flags=fast_bilinear,format={}",
-                        preview_width, preview_height, preview_format
-                    )
-                };
                 cmd.args([
                     "-loglevel", "error",
                     "-f", "rawvideo",
@@ -1160,8 +1147,6 @@ mod linux {
                     "-vf", &vf,
                 ]);
                 if is_fbdev {
-                    // For fbtft (nonstd=1) framebuffers, fbdev output doesn't work.
-                    // Output raw frames and write directly to the fb device.
                     cmd.args(["-f", "rawvideo", "pipe:1"]);
                     cmd.stdout(Stdio::piped());
                 } else {
@@ -1170,81 +1155,86 @@ mod linux {
                 }
                 cmd.stdin(Stdio::piped()).stderr(Stdio::null());
 
-                let mut c = cmd.spawn().map_err(|_| ())?;
-                let s = c.stdin.take().ok_or(())?;
-                *ffmpeg_stdin = Some(s);
+                let mut child = match cmd.spawn() {
+                    Ok(c) => c,
+                    Err(_) => break,
+                };
+                let mut stdin = match child.stdin.take() {
+                    Some(s) => s,
+                    None => break,
+                };
+
                 if is_fbdev {
-                    *ffmpeg_stdout = c.stdout.take();
-                    let f = std::fs::OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(&output)
-                        .map_err(|_| ())?;
-                    // mmap the framebuffer so writes trigger fbtft deferred_io refresh.
-                    unsafe {
-                        if let Ok(mm) = memmap2::MmapOptions::new()
-                            .len(frame_bytes)
-                            .map_mut(&f)
+                    let stdout = match child.stdout.take() {
+                        Some(s) => s,
+                        None => break,
+                    };
+                    let fb_path = output.clone();
+
+                    // Separate thread reads ffmpeg stdout → writes to fb.
+                    // Prevents deadlock: stdin write blocks if ffmpeg can't flush stdout.
+                    let reader = std::thread::spawn(move || {
+                        let mut stdout = stdout;
+                        let mut buf = vec![0u8; frame_bytes];
+                        let mut fd = match std::fs::OpenOptions::new()
+                            .write(true)
+                            .open(&fb_path)
                         {
-                            *fb_mmap = Some(mm);
+                            Ok(f) => f,
+                            Err(_) => return,
+                        };
+                        loop {
+                            if !read_exact(&mut stdout, &mut buf) {
+                                break;
+                            }
+                            use std::io::Seek;
+                            let _ = fd.seek(std::io::SeekFrom::Start(0));
+                            let _ = fd.write_all(&buf);
                         }
-                    }
-                    *fb_file = Some(f);
-                }
-                *child = Some(c);
-                Ok(())
-            };
+                    });
 
-            let ensure_running = |child: &mut Option<Child>,
-                                  ffmpeg_stdin: &mut Option<ChildStdin>,
-                                  ffmpeg_stdout: &mut Option<ChildStdout>,
-                                  fb_file: &mut Option<std::fs::File>,
-                                  fb_mmap: &mut Option<memmap2::MmapMut>| {
-                let exited = child
-                    .as_mut()
-                    .and_then(|c| c.try_wait().ok().flatten())
-                    .is_some();
-                if child.is_none() || exited {
-                    let _ = start_ffmpeg(child, ffmpeg_stdin, ffmpeg_stdout, fb_file, fb_mmap);
-                }
-            };
-
-            ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
-
-            while let Ok(frame) = rx.recv() {
-                ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
-                // Write raw capture frame to ffmpeg stdin.
-                if let Some(s) = ffmpeg_stdin.as_mut() {
-                    if s.write_all(&frame).is_err() {
-                        if let Some(mut c) = child.take() {
-                            let _ = c.kill();
-                            let _ = c.wait();
-                        }
-                        ffmpeg_stdin = None;
-                        ffmpeg_stdout = None;
-                        fb_mmap = None;
-                        fb_file = None;
-                        ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
-                        continue;
-                    }
-                }
-                // For fbdev: read scaled frame from ffmpeg stdout and write to fb.
-                if is_fbdev {
-                    if let Some(stdout) = ffmpeg_stdout.as_mut() {
-                        if read_exact(stdout, &mut fb_buf) {
-                            if let Some(fb) = fb_file.as_mut() {
-                                use std::io::Seek;
-                                let _ = fb.seek(std::io::SeekFrom::Start(0));
-                                let _ = fb.write_all(&fb_buf);
+                    let mut alive = true;
+                    while alive {
+                        match rx.recv() {
+                            Ok(frame) => {
+                                if stdin.write_all(&frame).is_err() {
+                                    alive = false;
+                                }
+                            }
+                            Err(_) => {
+                                drop(stdin);
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                let _ = reader.join();
+                                return;
                             }
                         }
                     }
+                    drop(stdin);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = reader.join();
+                } else {
+                    loop {
+                        match rx.recv() {
+                            Ok(frame) => {
+                                if stdin.write_all(&frame).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(_) => {
+                                drop(stdin);
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                return;
+                            }
+                        }
+                    }
+                    drop(stdin);
+                    let _ = child.kill();
+                    let _ = child.wait();
                 }
-            }
-
-            if let Some(mut c) = child.take() {
-                let _ = c.kill();
-                let _ = c.wait();
+                std::thread::sleep(Duration::from_millis(200));
             }
         });
 
