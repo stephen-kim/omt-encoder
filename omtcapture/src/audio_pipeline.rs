@@ -463,34 +463,8 @@ mod linux {
                 }
             }
 
-            if last_level_log.elapsed() >= Duration::from_secs(30) {
-                let hdmi_db = if hdmi_ok {
-                    calculate_rms_db(&hdmi_buf, frame_size * hdmi_channels.max(1))
-                } else {
-                    -100.0
-                };
-                let trs_db = if trs_ok {
-                    calculate_rms_db(&trs_buf, frame_size * trs_channels.max(1))
-                } else {
-                    -100.0
-                };
-                let mix_db = calculate_rms_db(&mix_buf, buffer_size);
-                println!(
-                    "Audio Levels (dB) -> HDMI: {:.1} | TRS: {:.1} | Mix: {:.1}",
-                    hdmi_db, trs_db, mix_db
-                );
-                last_level_log = Instant::now();
-            }
-            if last_read_log.elapsed() >= Duration::from_secs(30) {
-                println!(
-                    "Audio read failures (last 5s): total={}, hdmi={}, trs={}",
-                    read_failures_total, read_failures_hdmi, read_failures_trs
-                );
-                read_failures_total = 0;
-                read_failures_hdmi = 0;
-                read_failures_trs = 0;
-                last_read_log = Instant::now();
-            }
+            // No logging in the audio hot loop — any println! can cause
+            // stdout lock stalls that produce audible glitches.
 
             send_audio_frame(
                 &settings,
