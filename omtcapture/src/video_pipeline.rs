@@ -1117,11 +1117,14 @@ mod linux {
             let mut fb_file: Option<std::fs::File> = None;
             let frame_bytes = preview_width as usize * preview_height as usize * 2; // 16bpp
             let mut fb_buf = vec![0u8; frame_bytes];
+            // mmap for fbtft deferred_io: write() doesn't trigger SPI refresh, mmap+msync does.
+            let mut fb_mmap: Option<memmap2::MmapMut> = None;
 
             let start_ffmpeg = |child: &mut Option<Child>,
                                 ffmpeg_stdin: &mut Option<ChildStdin>,
                                 ffmpeg_stdout: &mut Option<ChildStdout>,
-                                fb_file: &mut Option<std::fs::File>|
+                                fb_file: &mut Option<std::fs::File>,
+                                fb_mmap: &mut Option<memmap2::MmapMut>|
              -> Result<(), ()> {
                 let mut cmd = Command::new("ffmpeg");
                 // Build the video filter chain: scale + optional rotation + format.
@@ -1173,9 +1176,19 @@ mod linux {
                 if is_fbdev {
                     *ffmpeg_stdout = c.stdout.take();
                     let f = std::fs::OpenOptions::new()
+                        .read(true)
                         .write(true)
                         .open(&output)
                         .map_err(|_| ())?;
+                    // mmap the framebuffer so writes trigger fbtft deferred_io refresh.
+                    unsafe {
+                        if let Ok(mm) = memmap2::MmapOptions::new()
+                            .len(frame_bytes)
+                            .map_mut(&f)
+                        {
+                            *fb_mmap = Some(mm);
+                        }
+                    }
                     *fb_file = Some(f);
                 }
                 *child = Some(c);
@@ -1185,20 +1198,21 @@ mod linux {
             let ensure_running = |child: &mut Option<Child>,
                                   ffmpeg_stdin: &mut Option<ChildStdin>,
                                   ffmpeg_stdout: &mut Option<ChildStdout>,
-                                  fb_file: &mut Option<std::fs::File>| {
+                                  fb_file: &mut Option<std::fs::File>,
+                                  fb_mmap: &mut Option<memmap2::MmapMut>| {
                 let exited = child
                     .as_mut()
                     .and_then(|c| c.try_wait().ok().flatten())
                     .is_some();
                 if child.is_none() || exited {
-                    let _ = start_ffmpeg(child, ffmpeg_stdin, ffmpeg_stdout, fb_file);
+                    let _ = start_ffmpeg(child, ffmpeg_stdin, ffmpeg_stdout, fb_file, fb_mmap);
                 }
             };
 
-            ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file);
+            ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
 
             while let Ok(frame) = rx.recv() {
-                ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file);
+                ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
                 // Write raw capture frame to ffmpeg stdin.
                 if let Some(s) = ffmpeg_stdin.as_mut() {
                     if s.write_all(&frame).is_err() {
@@ -1208,19 +1222,21 @@ mod linux {
                         }
                         ffmpeg_stdin = None;
                         ffmpeg_stdout = None;
+                        fb_mmap = None;
                         fb_file = None;
-                        ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file);
+                        ensure_running(&mut child, &mut ffmpeg_stdin, &mut ffmpeg_stdout, &mut fb_file, &mut fb_mmap);
                         continue;
                     }
                 }
-                // For fbdev: read scaled frame from ffmpeg stdout and write to fb.
+                // For fbdev: read scaled frame from ffmpeg stdout and write to fb via mmap.
+                // fbtft uses deferred_io: only mmap writes (+ flush) trigger SPI refresh.
                 if is_fbdev {
                     if let Some(stdout) = ffmpeg_stdout.as_mut() {
                         if read_exact(stdout, &mut fb_buf) {
-                            if let Some(fb) = fb_file.as_mut() {
-                                use std::io::Seek;
-                                let _ = fb.seek(std::io::SeekFrom::Start(0));
-                                let _ = fb.write_all(&fb_buf);
+                            if let Some(mm) = fb_mmap.as_mut() {
+                                let len = fb_buf.len().min(mm.len());
+                                mm[..len].copy_from_slice(&fb_buf[..len]);
+                                let _ = mm.flush();
                             }
                         }
                     }
