@@ -35,6 +35,17 @@ impl AudioPipeline {
         let send = self.send.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
+            // Set real-time scheduling for the audio thread to prevent glitches
+            // from CPU contention with video encode/preview.
+            #[cfg(target_os = "linux")]
+            unsafe {
+                let param = libc::sched_param { sched_priority: 50 };
+                if libc::sched_setscheduler(0, libc::SCHED_FIFO, &param) != 0 {
+                    // Fallback: at least raise nice priority.
+                    libc::setpriority(libc::PRIO_PROCESS, 0, -15);
+                }
+            }
+
             #[cfg(target_os = "linux")]
             linux::run_audio_loop(running, settings, send);
 
@@ -528,7 +539,10 @@ mod linux {
         for &sample in packed_scratch.iter() {
             wire_scratch.put_f32_le(sample);
         }
-        frame.data = bytes::Bytes::copy_from_slice(wire_scratch);
+        // Use BytesMut to avoid a separate heap allocation per frame.
+        let mut bm = bytes::BytesMut::with_capacity(wire_scratch.len());
+        bm.extend_from_slice(wire_scratch);
+        frame.data = bm.freeze();
         frame.update_data_length();
         send.enqueue_audio(frame);
     }
