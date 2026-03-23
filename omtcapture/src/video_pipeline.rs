@@ -160,6 +160,7 @@ mod linux {
         preview_width: u32,
         preview_height: u32,
         preview_format: String,
+        rotate: u32,
         last_sent: Instant,
         interval_ms: u64,
         tx: Option<mpsc::SyncSender<Bytes>>,
@@ -970,6 +971,7 @@ mod linux {
         device: String,
         fps: u32,
         pixel_format: String,
+        rotate: u32,
     }
 
     fn build_preview_sinks(
@@ -997,6 +999,7 @@ mod linux {
                     } else {
                         o.pixel_format.clone()
                     },
+                    rotate: o.rotate,
                 })
                 .collect()
         } else {
@@ -1009,6 +1012,7 @@ mod linux {
                     device: d,
                     fps: preview.fps,
                     pixel_format: preview.pixel_format.clone(),
+                    rotate: 0,
                 })
                 .collect()
         };
@@ -1081,6 +1085,7 @@ mod linux {
                 preview_width,
                 preview_height,
                 preview_format: fmt,
+                rotate: out.rotate,
                 last_sent: Instant::now(),
                 interval_ms,
                 tx: Some(tx),
@@ -1101,6 +1106,7 @@ mod linux {
         let preview_width = sink.preview_width;
         let preview_height = sink.preview_height;
         let preview_format = sink.preview_format.clone();
+        let rotate = sink.rotate;
         let output = sink.output.clone();
         let is_fbdev = output.starts_with("/dev/fb");
 
@@ -1118,6 +1124,29 @@ mod linux {
                                 fb_file: &mut Option<std::fs::File>|
              -> Result<(), ()> {
                 let mut cmd = Command::new("ffmpeg");
+                // Build the video filter chain: scale + optional rotation + format.
+                // transpose: 1=90°CW, 2=90°CCW, 3=180° (requires two transposes)
+                let vf = if rotate == 1 {
+                    format!(
+                        "scale={}:{}:flags=fast_bilinear,transpose=1,format={}",
+                        preview_height, preview_width, preview_format
+                    )
+                } else if rotate == 2 {
+                    format!(
+                        "scale={}:{}:flags=fast_bilinear,transpose=2,format={}",
+                        preview_height, preview_width, preview_format
+                    )
+                } else if rotate == 3 {
+                    format!(
+                        "scale={}:{}:flags=fast_bilinear,transpose=1,transpose=1,format={}",
+                        preview_width, preview_height, preview_format
+                    )
+                } else {
+                    format!(
+                        "scale={}:{}:flags=fast_bilinear,format={}",
+                        preview_width, preview_height, preview_format
+                    )
+                };
                 cmd.args([
                     "-loglevel", "error",
                     "-f", "rawvideo",
@@ -1125,10 +1154,7 @@ mod linux {
                     "-s", &format!("{}x{}", input_width, input_height),
                     "-r", &input_rate,
                     "-i", "pipe:0",
-                    "-vf", &format!(
-                        "scale={}:{}:flags=fast_bilinear,format={}",
-                        preview_width, preview_height, preview_format
-                    ),
+                    "-vf", &vf,
                 ]);
                 if is_fbdev {
                     // For fbtft (nonstd=1) framebuffers, fbdev output doesn't work.

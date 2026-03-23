@@ -129,6 +129,8 @@ pub struct PreviewOutputSettings {
     pub device: String,
     pub fps: u32,
     pub pixel_format: String,
+    /// 0=none, 1=90°CW, 2=90°CCW, 3=180°
+    pub rotate: u32,
 }
 
 impl Default for PreviewOutputSettings {
@@ -137,6 +139,7 @@ impl Default for PreviewOutputSettings {
             device: String::new(),
             fps: 0,
             pixel_format: "rgb565le".to_string(),
+            rotate: 0,
         }
     }
 }
