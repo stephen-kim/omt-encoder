@@ -171,9 +171,12 @@ fn merge_empty_fields(old: &Settings, new: &mut Settings) {
         new.video.frame_rate_d = old.video.frame_rate_d;
     }
 
-    // Preview: keep list stable if UI omits it.
+    // Preview: keep lists stable if UI omits them.
     if new.preview.output_devices.is_empty() && !old.preview.output_devices.is_empty() {
         new.preview.output_devices = old.preview.output_devices.clone();
+    }
+    if new.preview.outputs.is_empty() && !old.preview.outputs.is_empty() {
+        new.preview.outputs = old.preview.outputs.clone();
     }
     if new.preview.fps == 0 {
         new.preview.fps = old.preview.fps;

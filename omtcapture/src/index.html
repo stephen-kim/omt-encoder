@@ -426,27 +426,16 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
 
     <div class="card">
-      <div class="card-title">Preview</div>
+      <div class="card-title">Preview / HDMI Passthrough</div>
       <div class="check-row">
         <input id="previewEnabled" type="checkbox" />
         <label for="previewEnabled">Preview enabled</label>
       </div>
-      <div class="help">Preview is rendered locally to framebuffer devices.</div>
+      <div class="help">Output captured video to framebuffer devices (SPI LCD, HDMI out).</div>
 
-      <label>Preview outputs</label>
-      <div id="previewOutputs" class="check-grid"></div>
-
-      <div class="inline">
-        <div>
-          <label>Preview fps</label>
-          <input id="previewFps" type="number" />
-        </div>
-        <div>
-          <label>Preview pixel format</label>
-          <input id="previewPixelFormat" />
-        </div>
-      </div>
-      <div class="help">Lower preview fps to save CPU when the main stream is stable.</div>
+      <label>Outputs</label>
+      <div id="previewOutputs"></div>
+      <div class="help">Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).</div>
     </div>
   </section>
 
@@ -487,23 +476,38 @@ function setSelectOptions(selectId, options, selectedValue) {
   });
 }
 
-function setPreviewOutputs(selected) {
+function setPreviewOutputs(outputs) {
+  // outputs is the new per-output array: [{device, fps, pixel_format}, ...]
   const container = document.getElementById('previewOutputs');
-  const selectedSet = new Set(selected);
-  container.querySelectorAll('input[type=checkbox]').forEach(input => {
-    input.checked = selectedSet.has(input.value);
+  const outputMap = {};
+  (outputs || []).forEach(o => { outputMap[o.device] = o; });
+  container.querySelectorAll('.preview-output-row').forEach(row => {
+    const dev = row.dataset.device;
+    const cfg = outputMap[dev];
+    row.querySelector('.preview-out-enabled').checked = !!cfg;
+    row.querySelector('.preview-out-fps').value = cfg ? cfg.fps : 10;
+    row.querySelector('.preview-out-fmt').value = cfg ? cfg.pixel_format : 'rgb565le';
   });
 }
 
 function getPreviewOutputs() {
   const container = document.getElementById('previewOutputs');
   const outputs = [];
-  container.querySelectorAll('input[type=checkbox]').forEach(input => {
-    if (input.checked) {
-      outputs.push(input.value);
+  container.querySelectorAll('.preview-output-row').forEach(row => {
+    if (row.querySelector('.preview-out-enabled').checked) {
+      outputs.push({
+        device: row.dataset.device,
+        fps: Number(row.querySelector('.preview-out-fps').value) || 0,
+        pixel_format: row.querySelector('.preview-out-fmt').value || 'rgb565le'
+      });
     }
   });
   return outputs;
+}
+
+// Legacy compat
+function getPreviewOutputDevices() {
+  return getPreviewOutputs().map(o => o.device);
 }
 
 function getAudioInputSelection() {
@@ -700,16 +704,38 @@ async function loadDevices() {
   limitAudioInputs();
   const outputsContainer = document.getElementById('previewOutputs');
   outputsContainer.innerHTML = '';
+  const existingOutputs = config.preview.outputs || [];
+  const existingMap = {};
+  existingOutputs.forEach(o => { existingMap[o.device] = o; });
   fbOptions.forEach(opt => {
-    const wrapper = document.createElement('label');
-    wrapper.className = 'check-item';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.value = opt.value;
-    checkbox.checked = (config.preview.output_devices || []).includes(opt.value);
-    wrapper.appendChild(checkbox);
-    wrapper.appendChild(document.createTextNode(opt.label));
-    outputsContainer.appendChild(wrapper);
+    const row = document.createElement('div');
+    row.className = 'preview-output-row';
+    row.dataset.device = opt.value;
+    row.style.cssText = 'display:grid;grid-template-columns:auto 1fr 70px 100px;gap:8px;align-items:center;margin-top:6px;';
+    const cfg = existingMap[opt.value];
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'preview-out-enabled';
+    cb.checked = !!cfg;
+    const lbl = document.createElement('span');
+    lbl.style.fontSize = '13px';
+    lbl.textContent = opt.label;
+    const fps = document.createElement('input');
+    fps.type = 'number';
+    fps.className = 'preview-out-fps';
+    fps.placeholder = 'FPS';
+    fps.value = cfg ? cfg.fps : 10;
+    fps.style.cssText = 'width:70px;padding:6px 8px;margin:0;';
+    const fmt = document.createElement('input');
+    fmt.className = 'preview-out-fmt';
+    fmt.placeholder = 'format';
+    fmt.value = cfg ? cfg.pixel_format : 'rgb565le';
+    fmt.style.cssText = 'width:100px;padding:6px 8px;margin:0;';
+    row.appendChild(cb);
+    row.appendChild(lbl);
+    row.appendChild(fps);
+    row.appendChild(fmt);
+    outputsContainer.appendChild(row);
   });
 }
 
@@ -741,9 +767,7 @@ async function loadConfig() {
   document.getElementById('monitorGain').value = data.audio.monitor.gain;
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
-  setPreviewOutputs(data.preview.output_devices || []);
-  document.getElementById('previewFps').value = data.preview.fps;
-  document.getElementById('previewPixelFormat').value = data.preview.pixel_format;
+  setPreviewOutputs(data.preview.outputs || []);
 
   document.getElementById('sendAudioQueueCapacity').value = data.send.audio_queue_capacity;
   document.getElementById('sendVideoQueueCapacity').value = data.send.video_queue_capacity;
@@ -838,9 +862,8 @@ async function saveConfig() {
   payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
-  payload.preview.output_devices = getPreviewOutputs();
-  payload.preview.fps = Number(document.getElementById('previewFps').value);
-  payload.preview.pixel_format = document.getElementById('previewPixelFormat').value;
+  payload.preview.outputs = getPreviewOutputs();
+  payload.preview.output_devices = getPreviewOutputDevices();
 
   // Prevent accidental 0/NaN from empty inputs (which can trigger full pipeline restart).
   const aq = Number(document.getElementById('sendAudioQueueCapacity').value);
