@@ -1024,69 +1024,80 @@ mod linux {
         sinks
     }
 
-    fn spawn_preview_worker(mut sink: PreviewSink, rx: mpsc::Receiver<Bytes>) -> PreviewSink {
+    fn spawn_preview_worker(sink: PreviewSink, rx: mpsc::Receiver<Bytes>) -> PreviewSink {
+        // Move fields needed by the thread out of sink before spawning, to avoid partial move.
+        let pix_fmt = sink.pix_fmt.clone();
+        let input_width = sink.input_width;
+        let input_height = sink.input_height;
+        let input_rate = sink.input_rate.clone();
+        let preview_width = sink.preview_width;
+        let preview_height = sink.preview_height;
+        let preview_format = sink.preview_format.clone();
+        let output = sink.output.clone();
+
         let handle = std::thread::spawn(move || {
             let mut child: Option<Child> = None;
             let mut stdin: Option<ChildStdin> = None;
 
-            let mut start = || -> Result<(), ()> {
-                let mut cmd = Command::new("ffmpeg");
-                cmd.args([
-                    "-loglevel",
-                    "error",
-                    "-f",
-                    "rawvideo",
-                    "-pix_fmt",
-                    &sink.pix_fmt,
-                    "-s",
-                    &format!("{}x{}", sink.input_width, sink.input_height),
-                    "-r",
-                    &sink.input_rate,
-                    "-i",
-                    "pipe:0",
-                    "-vf",
-                    &format!(
-                        "scale={}:{}:flags=fast_bilinear,format={}",
-                        sink.preview_width, sink.preview_height, sink.preview_format
-                    ),
-                    "-f",
-                    "fbdev",
-                    &sink.output,
-                ])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
+            let start_ffmpeg =
+                |child: &mut Option<Child>, stdin: &mut Option<ChildStdin>| -> Result<(), ()> {
+                    let mut cmd = Command::new("ffmpeg");
+                    cmd.args([
+                        "-loglevel",
+                        "error",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        &pix_fmt,
+                        "-s",
+                        &format!("{}x{}", input_width, input_height),
+                        "-r",
+                        &input_rate,
+                        "-i",
+                        "pipe:0",
+                        "-vf",
+                        &format!(
+                            "scale={}:{}:flags=fast_bilinear,format={}",
+                            preview_width, preview_height, preview_format
+                        ),
+                        "-f",
+                        "fbdev",
+                        &output,
+                    ])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
 
-                let mut c = cmd.spawn().map_err(|_| ())?;
-                let s = c.stdin.take().ok_or(())?;
-                child = Some(c);
-                stdin = Some(s);
-                Ok(())
-            };
+                    let mut c = cmd.spawn().map_err(|_| ())?;
+                    let s = c.stdin.take().ok_or(())?;
+                    *child = Some(c);
+                    *stdin = Some(s);
+                    Ok(())
+                };
 
-            let mut ensure_running = || {
-                let exited = child
-                    .as_mut()
-                    .and_then(|c| c.try_wait().ok().flatten())
-                    .is_some();
-                if child.is_none() || exited {
-                    let _ = start();
-                }
-            };
+            let ensure_running =
+                |child: &mut Option<Child>, stdin: &mut Option<ChildStdin>| {
+                    let exited = child
+                        .as_mut()
+                        .and_then(|c| c.try_wait().ok().flatten())
+                        .is_some();
+                    if child.is_none() || exited {
+                        let _ = start_ffmpeg(child, stdin);
+                    }
+                };
 
-            ensure_running();
+            ensure_running(&mut child, &mut stdin);
 
             while let Ok(frame) = rx.recv() {
-                ensure_running();
+                ensure_running(&mut child, &mut stdin);
                 if let Some(s) = stdin.as_mut() {
                     if s.write_all(&frame).is_err() {
-                        // Restart on write failure.
                         if let Some(mut c) = child.take() {
                             let _ = c.kill();
                             let _ = c.wait();
                         }
                         stdin = None;
-                        ensure_running();
+                        ensure_running(&mut child, &mut stdin);
                     }
                 }
             }
@@ -1097,8 +1108,10 @@ mod linux {
             }
         });
 
-        sink.handle = Some(handle);
-        sink
+        PreviewSink {
+            handle: Some(handle),
+            ..sink
+        }
     }
 
     fn fourcc_to_codec(fourcc: FourCC) -> OMTCodec {

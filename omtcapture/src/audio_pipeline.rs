@@ -70,7 +70,6 @@ mod stub {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use alsa::errno::Errno;
     use alsa::pcm::{Access, Format, HwParams, State, PCM};
     use alsa::{Direction, ValueOr};
     use bytes::BufMut;
@@ -79,6 +78,10 @@ mod linux {
     use std::io::Write;
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::time::Instant;
+
+    fn is_eagain(e: &alsa::Error) -> bool {
+        e.errno() == nix::errno::Errno::EAGAIN
+    }
 
     #[derive(Clone, Copy, Debug)]
     enum SampleFormat {
@@ -997,7 +1000,7 @@ mod linux {
                 match io.readi(buffer) {
                     Ok(count) => Ok(count),
                     Err(e) => {
-                        if e.errno() == Errno::EAGAIN {
+                        if is_eagain(&e) {
                             // Non-blocking capture: no data available right now.
                             return Ok(0);
                         }
@@ -1019,7 +1022,7 @@ mod linux {
                 let count = match io.readi(&mut scratch_i16[..samples]) {
                     Ok(v) => v,
                     Err(e) => {
-                        if e.errno() == Errno::EAGAIN {
+                        if is_eagain(&e) {
                             return Ok(0);
                         }
                         if matches!(input.pcm.state(), State::XRun | State::Suspended) {

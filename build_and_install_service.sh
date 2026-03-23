@@ -6,8 +6,6 @@ LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture-rs}"
 SKIP_DEPS="${SKIP_DEPS:-0}"
-DISABLE_CSHARP="${DISABLE_CSHARP:-1}"
-REMOVE_CSHARP="${REMOVE_CSHARP:-0}"
 LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
 CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
@@ -40,6 +38,35 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
+# ── Clean up previous installations ──────────────────────────────────────────
+echo "Cleaning up previous installations..."
+
+# Remove legacy C# omtcapture service and files
+if systemctl is-active --quiet omtcapture 2>/dev/null; then
+  echo "  Stopping C# omtcapture service..."
+  sudo systemctl stop omtcapture
+fi
+if systemctl is-enabled --quiet omtcapture 2>/dev/null; then
+  echo "  Disabling C# omtcapture service..."
+  sudo systemctl disable omtcapture
+fi
+if [[ -f /etc/systemd/system/omtcapture.service ]]; then
+  echo "  Removing C# service file..."
+  sudo rm -f /etc/systemd/system/omtcapture.service
+  sudo systemctl daemon-reload
+fi
+if [[ -d /opt/omtcapture ]]; then
+  echo "  Removing C# install directory (/opt/omtcapture)..."
+  sudo rm -rf /opt/omtcapture
+fi
+
+# Stop existing Rust service before reinstall
+if systemctl is-active --quiet omtcapture-rs 2>/dev/null; then
+  echo "  Stopping existing omtcapture-rs service..."
+  sudo systemctl stop omtcapture-rs
+fi
+
+# ── Install dependencies ─────────────────────────────────────────────────────
 if [[ "$SKIP_DEPS" != "1" ]]; then
   echo "Installing dependencies..."
   sudo apt update
@@ -48,6 +75,7 @@ if [[ "$SKIP_DEPS" != "1" ]]; then
   sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
 
+# ── LCD-show ─────────────────────────────────────────────────────────────────
 if [[ "$SKIP_LCD" != "1" ]]; then
   if sudo test -f "$LCD_MARKER"; then
     echo "LCD-show already installed (marker found: $LCD_MARKER). Skipping."
@@ -71,6 +99,7 @@ fi
 
 ensure_cmdline_flags
 
+# ── Build ────────────────────────────────────────────────────────────────────
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Rust toolchain not found. Installing via rustup..."
   export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
@@ -80,30 +109,11 @@ if ! command -v cargo >/dev/null 2>&1; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-echo "Building Rust omtcapture (release)..."
+echo "Building omtcapture (release)..."
 cd "$ROOT_DIR"
 cargo build --release -p omtcapture
 
-if [[ "$DISABLE_CSHARP" = "1" ]]; then
-  if systemctl is-active --quiet omtcapture; then
-    echo "Stopping C# omtcapture service..."
-    sudo systemctl stop omtcapture
-  fi
-  if systemctl is-enabled --quiet omtcapture; then
-    echo "Disabling C# omtcapture service..."
-    sudo systemctl disable omtcapture
-  fi
-  if [[ "$REMOVE_CSHARP" = "1" ]]; then
-    echo "Removing C# install directory (/opt/omtcapture)..."
-    sudo rm -rf /opt/omtcapture
-  fi
-fi
-
-if systemctl is-active --quiet omtcapture-rs; then
-  echo "Stopping existing omtcapture-rs service..."
-  sudo systemctl stop omtcapture-rs
-fi
-
+# ── Install ──────────────────────────────────────────────────────────────────
 echo "Installing to $INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$ROOT_DIR/target/release/omtcapture" "$INSTALL_DIR/"
@@ -117,6 +127,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable omtcapture-rs
 sudo systemctl restart omtcapture-rs
 
+# ── Verify ───────────────────────────────────────────────────────────────────
 echo "Running post-install checks..."
 sleep 1
 if ! systemctl is-active --quiet omtcapture-rs; then
@@ -151,5 +162,4 @@ Install complete.
 - Config: $INSTALL_DIR/config.json
 - Service: sudo systemctl status omtcapture-rs
 - Logs: journalctl -u omtcapture-rs -f
- - C# service disabled: $DISABLE_CSHARP (removed: $REMOVE_CSHARP)
 MESSAGE
