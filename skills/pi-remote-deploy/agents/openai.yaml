@@ -1,4 +1,0 @@
-interface:
-  display_name: "Pi Remote Deploy"
-  short_description: "SSH deploy to Raspberry Pi with pull/build/service checks"
-  default_prompt: "Deploy to Raspberry Pi over SSH: git pull, run build/install script, and report service status + logs."
