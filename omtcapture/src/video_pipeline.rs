@@ -189,6 +189,35 @@ mod linux {
             }
         };
 
+        // Set the desired capture format explicitly. Without this, V4L2 may default to the
+        // smallest resolution the device supports (e.g. 720x576 instead of 1920x1080).
+        {
+            let desired_fourcc = match settings.codec.to_ascii_uppercase().as_str() {
+                "UYVY" => FourCC::new(b"UYVY"),
+                "NV12" => FourCC::new(b"NV12"),
+                "YV12" | "YU12" => FourCC::new(b"YU12"),
+                "BGRA" => FourCC::new(b"BGRA"),
+                _ => FourCC::new(b"YUYV"),
+            };
+            if let Ok(mut current_fmt) = dev.format() {
+                current_fmt.width = settings.width.max(1);
+                current_fmt.height = settings.height.max(1);
+                current_fmt.fourcc = desired_fourcc;
+                match dev.set_format(&current_fmt) {
+                    Ok(actual) => {
+                        println!(
+                            "V4L2 format set: requested {}x{} {:?}, got {}x{} {:?}",
+                            settings.width, settings.height, desired_fourcc,
+                            actual.width, actual.height, actual.fourcc
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: failed to set V4L2 format: {}", e);
+                    }
+                }
+            }
+        }
+
         let fmt = match dev.format() {
             Ok(f) => f,
             Err(e) => {
