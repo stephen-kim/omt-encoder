@@ -4,8 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture}"
-OVERWRITE_CONFIG="${OVERWRITE_CONFIG:-0}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture-rs}"
+SKIP_DEPS="${SKIP_DEPS:-0}"
+DISABLE_CSHARP="${DISABLE_CSHARP:-1}"
+REMOVE_CSHARP="${REMOVE_CSHARP:-0}"
 LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
 CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
@@ -34,19 +36,16 @@ ensure_cmdline_flags() {
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "This installer is intended for Raspberry Pi OS (Linux)."
+  echo "This installer is intended for Linux (Raspberry Pi / Orange Pi)."
   exit 1
 fi
 
-echo "Updating packages and installing dependencies..."
-sudo apt update
-sudo apt install -y git clang ffmpeg alsa-utils libasound2
-
-if ! command -v dotnet >/dev/null 2>&1; then
-  echo "Installing .NET 8 SDK..."
-  curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 8.0
-  export DOTNET_ROOT="$HOME/.dotnet"
-  export PATH="$PATH:$DOTNET_ROOT"
+if [[ "$SKIP_DEPS" != "1" ]]; then
+  echo "Installing dependencies..."
+  sudo apt update
+  sudo apt install -y git build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev avahi-daemon avahi-utils
+  sudo systemctl enable avahi-daemon >/dev/null 2>&1 || true
+  sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
 
 if [[ "$SKIP_LCD" != "1" ]]; then
@@ -72,57 +71,85 @@ fi
 
 ensure_cmdline_flags
 
-echo "Building libvmx..."
-cd "$ROOT_DIR/libvmx/build"
-chmod 755 buildlinuxarm64.sh
-./buildlinuxarm64.sh
-
-echo "Building libomtnet..."
-cd "$ROOT_DIR/libomtnet/build"
-chmod 755 buildall.sh
-./buildall.sh
-
-echo "Building omtcapture..."
-cd "$ROOT_DIR/omtcapture/build"
-chmod 755 buildlinuxarm64.sh
-./buildlinuxarm64.sh
-
-if systemctl is-active --quiet omtcapture; then
-  echo "Stopping omtcapture service before install..."
-  sudo systemctl stop omtcapture
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Rust toolchain not found. Installing via rustup..."
+  export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+  export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+  export RUSTUP_INIT_SKIP_PATH_CHECK=1
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+  export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-sudo mkdir -p "$INSTALL_DIR"
-CONFIG_BACKUP=""
-if sudo test -f "$INSTALL_DIR/config.xml"; then
-  CONFIG_BACKUP="$(mktemp)"
-  sudo cp "$INSTALL_DIR/config.xml" "$CONFIG_BACKUP"
-fi
+echo "Building Rust omtcapture (release)..."
+cd "$ROOT_DIR"
+cargo build --release -p omtcapture
 
-for file in "$ROOT_DIR/omtcapture/build/arm64/"*; do
-  base="$(basename "$file")"
-  if [[ "$base" == "config.xml" ]]; then
-    continue
+if [[ "$DISABLE_CSHARP" = "1" ]]; then
+  if systemctl is-active --quiet omtcapture; then
+    echo "Stopping C# omtcapture service..."
+    sudo systemctl stop omtcapture
   fi
-  sudo cp "$file" "$INSTALL_DIR/"
-done
-
-if [[ -n "$CONFIG_BACKUP" && "$OVERWRITE_CONFIG" != "1" ]]; then
-  sudo cp "$CONFIG_BACKUP" "$INSTALL_DIR/config.xml"
-  rm -f "$CONFIG_BACKUP"
-elif [[ -n "$CONFIG_BACKUP" ]]; then
-  rm -f "$CONFIG_BACKUP"
+  if systemctl is-enabled --quiet omtcapture; then
+    echo "Disabling C# omtcapture service..."
+    sudo systemctl disable omtcapture
+  fi
+  if [[ "$REMOVE_CSHARP" = "1" ]]; then
+    echo "Removing C# install directory (/opt/omtcapture)..."
+    sudo rm -rf /opt/omtcapture
+  fi
 fi
-sudo cp "$ROOT_DIR/omtcapture/omtcapture.service" /etc/systemd/system/omtcapture.service
 
+if systemctl is-active --quiet omtcapture-rs; then
+  echo "Stopping existing omtcapture-rs service..."
+  sudo systemctl stop omtcapture-rs
+fi
+
+echo "Installing to $INSTALL_DIR"
+sudo mkdir -p "$INSTALL_DIR"
+sudo cp "$ROOT_DIR/target/release/omtcapture" "$INSTALL_DIR/"
+
+if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
+  sudo cp "$ROOT_DIR/omtcapture/config.json" "$INSTALL_DIR/"
+fi
+
+sudo cp "$ROOT_DIR/omtcapture/omtcapture-rs.service" /etc/systemd/system/omtcapture-rs.service
 sudo systemctl daemon-reload
-sudo systemctl enable omtcapture
-sudo systemctl restart omtcapture
+sudo systemctl enable omtcapture-rs
+sudo systemctl restart omtcapture-rs
+
+echo "Running post-install checks..."
+sleep 1
+if ! systemctl is-active --quiet omtcapture-rs; then
+  echo "ERROR: omtcapture-rs service is not active."
+  sudo systemctl status omtcapture-rs --no-pager || true
+  exit 1
+fi
+
+if ! sudo ss -lntp | grep -q ":6400 "; then
+  echo "ERROR: port 6400 is not listening."
+  sudo ss -lntp || true
+  exit 1
+fi
+
+if ! sudo ss -lntp | grep -q ":8080 "; then
+  echo "WARN: web UI port 8080 is not listening."
+fi
+
+if command -v avahi-browse >/dev/null 2>&1; then
+  if ! timeout 3 avahi-browse -rt _omt._tcp >/tmp/omt_avahi_check.txt 2>/dev/null; then
+    echo "WARN: avahi browse timed out."
+  fi
+  if ! grep -q "_omt._tcp" /tmp/omt_avahi_check.txt 2>/dev/null; then
+    echo "WARN: _omt._tcp mDNS service not discovered yet."
+  fi
+fi
 
 cat <<MESSAGE
 
 Install complete.
-- Config: $INSTALL_DIR/config.xml
-- Service: sudo systemctl restart omtcapture
-- Logs: journalctl -u omtcapture -f
+- Binary: $INSTALL_DIR/omtcapture
+- Config: $INSTALL_DIR/config.json
+- Service: sudo systemctl status omtcapture-rs
+- Logs: journalctl -u omtcapture-rs -f
+ - C# service disabled: $DISABLE_CSHARP (removed: $REMOVE_CSHARP)
 MESSAGE

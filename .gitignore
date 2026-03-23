@@ -4,12 +4,14 @@
 
 # Rust build artifacts
 target/
-rust_port/target/
 
-# Configuration
-rust_port/config.json
+# Configuration (runtime generated)
+config.json
 
 # IDE/Misc
 .vscode/
 *.swp
 *.bak
+
+# Legacy C# code (kept locally for reference only)
+legacy/

@@ -22,7 +22,7 @@ Options:
 
 Examples:
   pi_remote_deploy.sh --host 192.168.0.50 --repo-path ~/cpm-omt-encode --skip-lcd
-  pi_remote_deploy.sh --host pi.local --build-script rust_port/build_and_install_service.sh --service omtcapture-rs
+  pi_remote_deploy.sh --host pi.local --build-script build_and_install_service.sh --service omtcapture-rs
 EOF
 }
 

@@ -9,7 +9,7 @@
 
 ### Rust stack
 
-- `--build-script rust_port/build_and_install_service.sh`
+- `--build-script build_and_install_service.sh`
 - `--service omtcapture-rs`
 
 ## Recommended Preflight Checks

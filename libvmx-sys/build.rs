@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    let root_dir = PathBuf::from("../../libvmx/src");
+    let root_dir = PathBuf::from("../libvmx/src");
 
     // 1. Generate Bindings
     let bindings = bindgen::Builder::default()
@@ -72,6 +72,6 @@ fn main() {
 
     build.compile("vmxcodec");
 
-    println!("cargo:rerun-if-changed=../../libvmx/src/vmxcodec.h");
-    println!("cargo:rerun-if-changed=../../libvmx/src/vmxcodec.cpp");
+    println!("cargo:rerun-if-changed=../libvmx/src/vmxcodec.h");
+    println!("cargo:rerun-if-changed=../libvmx/src/vmxcodec.cpp");
 }

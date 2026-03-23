@@ -41,7 +41,7 @@ skills/pi-remote-deploy/scripts/pi_remote_deploy.sh \
   --host <pi-host-or-ip> \
   --user pi \
   --repo-path ~/omt-encode \
-  --build-script rust_port/build_and_install_service.sh \
+  --build-script build_and_install_service.sh \
   --service omtcapture-rs \
   --skip-lcd
 ```
