@@ -281,6 +281,7 @@ fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
     old.preview.enabled != new.preview.enabled
         || old.preview.output_device != new.preview.output_device
         || old.preview.output_devices != new.preview.output_devices
+        || old.preview.outputs != new.preview.outputs
         || old.preview.width != new.preview.width
         || old.preview.height != new.preview.height
         || old.preview.fps != new.preview.fps

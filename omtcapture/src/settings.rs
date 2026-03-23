@@ -123,7 +123,7 @@ impl Default for WebSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PreviewOutputSettings {
     pub device: String,
