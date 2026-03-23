@@ -162,7 +162,8 @@ pub struct Settings {
 impl Settings {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let settings: Settings = serde_json::from_str(&content)?;
+        let mut settings: Settings = serde_json::from_str(&content)?;
+        normalize_audio_mode(&mut settings.audio);
         Ok(settings)
     }
 
@@ -315,15 +316,13 @@ fn child_f32(node: roxmltree::Node<'_, '_>, name: &str) -> Option<f32> {
 }
 
 fn normalize_audio_mode(audio: &mut AudioSettings) {
-    match audio.mode.trim().to_ascii_lowercase().as_str() {
-        "hdmi" => audio.trs_device.clear(),
-        "trs" => audio.hdmi_device.clear(),
-        "none" => {
-            audio.hdmi_device.clear();
-            audio.trs_device.clear();
-        }
-        _ => {}
-    }
+    // Keep routing device fields intact. Mode selects which ones to use at runtime.
+    // Clearing fields here can accidentally erase valid device settings when loading config.
+    let mode = audio.mode.trim().to_ascii_lowercase();
+    audio.mode = match mode.as_str() {
+        "none" | "hdmi" | "trs" | "both" => mode,
+        _ => "both".to_string(),
+    };
 }
 
 #[cfg(test)]

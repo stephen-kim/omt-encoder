@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,18 +20,13 @@ struct Queues {
 // video can accumulate seconds of delay.
 const AUDIO_BURST_BEFORE_VIDEO: usize = 4;
 
-#[derive(Default)]
-struct SendStats {
-    audio_dropped: usize,
-    video_dropped: usize,
-    audio_send_zero: usize,
-    video_send_zero: usize,
-    last_log: Option<Instant>,
-}
-
 struct Inner {
     queues: Mutex<Queues>,
-    stats: Mutex<SendStats>,
+    // Lock-free stats to avoid contention with the queue mutex.
+    audio_dropped: AtomicUsize,
+    video_dropped: AtomicUsize,
+    audio_send_zero: AtomicUsize,
+    video_send_zero: AtomicUsize,
     cv: Condvar,
     running: AtomicBool,
     tx: ServerSenders,
@@ -51,7 +46,10 @@ impl SendCoordinator {
                 audio: VecDeque::with_capacity(audio_capacity),
                 video_latest: None,
             }),
-            stats: Mutex::new(SendStats::default()),
+            audio_dropped: AtomicUsize::new(0),
+            video_dropped: AtomicUsize::new(0),
+            audio_send_zero: AtomicUsize::new(0),
+            video_send_zero: AtomicUsize::new(0),
             cv: Condvar::new(),
             running: AtomicBool::new(true),
             tx,
@@ -84,8 +82,7 @@ impl SendCoordinator {
         if !is_audio {
             // Replace the previous unsent frame to avoid building delay.
             if guard.video_latest.is_some() {
-                let mut stats = self.inner.stats.lock().unwrap();
-                stats.video_dropped += 1;
+                self.inner.video_dropped.fetch_add(1, Ordering::Relaxed);
             }
             guard.video_latest = Some(frame);
             self.inner.cv.notify_one();
@@ -95,10 +92,15 @@ impl SendCoordinator {
         let queue = &mut guard.audio;
         let capacity = self.inner.settings.audio_queue_capacity;
 
+        let mut dropped = 0usize;
         while queue.len() >= capacity {
             queue.pop_front();
-            let mut stats = self.inner.stats.lock().unwrap();
-            stats.audio_dropped += 1;
+            dropped += 1;
+        }
+        if dropped > 0 {
+            self.inner
+                .audio_dropped
+                .fetch_add(dropped, Ordering::Relaxed);
         }
         queue.push_back(frame);
         self.inner.cv.notify_one();
@@ -115,6 +117,7 @@ impl Drop for SendCoordinator {
 
 fn run_send_loop(inner: Arc<Inner>) {
     let mut audio_budget = AUDIO_BURST_BEFORE_VIDEO;
+    let mut last_stats_log = Instant::now();
     while inner.running.load(Ordering::SeqCst) {
         let mut next_frame = None;
         let mut is_audio = false;
@@ -150,11 +153,13 @@ fn run_send_loop(inner: Arc<Inner>) {
         }
 
         if let Some(mut frame) = next_frame {
-            // Keep capture timestamps as produced by the audio/video pipelines.
-            // Optionally force zero timestamps for debugging.
-            if inner.settings.force_zero_timestamps {
-                frame.header.timestamp = 0;
-            }
+            // Match C# sender behavior: timestamps are assigned at *send-time*.
+            // This avoids large offsets when pipelines restart and reduces receiver-side buffering.
+            frame.header.timestamp = if inner.settings.force_zero_timestamps {
+                0
+            } else {
+                crate::timebase::monotonic_100ns()
+            };
             let send_result = if is_audio {
                 inner.tx.audio.send(frame)
             } else {
@@ -166,44 +171,30 @@ fn run_send_loop(inner: Arc<Inner>) {
                 Err(_) => 0,
             };
             if receivers == 0 {
-                let mut stats = inner.stats.lock().unwrap();
                 if is_audio {
-                    stats.audio_send_zero += 1;
+                    inner.audio_send_zero.fetch_add(1, Ordering::Relaxed);
                 } else {
-                    stats.video_send_zero += 1;
+                    inner.video_send_zero.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
 
-        log_stats(&inner);
-    }
-}
-
-fn log_stats(inner: &Arc<Inner>) {
-    let mut stats = inner.stats.lock().unwrap();
-    let now = Instant::now();
-    if let Some(last) = stats.last_log {
-        if now.duration_since(last).as_secs_f64() < 5.0 {
-            return;
+        // Log stats periodically without acquiring any mutex.
+        let now = Instant::now();
+        if now.duration_since(last_stats_log).as_secs_f64() >= 5.0 {
+            last_stats_log = now;
+            let ad = inner.audio_dropped.swap(0, Ordering::Relaxed);
+            let vd = inner.video_dropped.swap(0, Ordering::Relaxed);
+            let az = inner.audio_send_zero.swap(0, Ordering::Relaxed);
+            let vz = inner.video_send_zero.swap(0, Ordering::Relaxed);
+            if ad > 0 || vd > 0 || az > 0 || vz > 0 {
+                println!(
+                    "Send stats (last 5s): audioDropped={}, videoDropped={}, audioSendZero={}, videoSendZero={}",
+                    ad, vd, az, vz
+                );
+            }
         }
     }
-
-    if stats.audio_dropped > 0
-        || stats.video_dropped > 0
-        || stats.audio_send_zero > 0
-        || stats.video_send_zero > 0
-    {
-        println!(
-            "Send stats (last 5s): audioDropped={}, videoDropped={}, audioSendZero={}, videoSendZero={}",
-            stats.audio_dropped, stats.video_dropped, stats.audio_send_zero, stats.video_send_zero
-        );
-    }
-
-    stats.audio_dropped = 0;
-    stats.video_dropped = 0;
-    stats.audio_send_zero = 0;
-    stats.video_send_zero = 0;
-    stats.last_log = Some(now);
 }
 
 fn clamp(value: usize, min: usize, max: usize) -> usize {

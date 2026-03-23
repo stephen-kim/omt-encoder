@@ -70,11 +70,14 @@ mod stub {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
+    use alsa::errno::Errno;
     use alsa::pcm::{Access, Format, HwParams, State, PCM};
     use alsa::{Direction, ValueOr};
     use bytes::BufMut;
     use libomtnet::{OMTFrame, OMTFrameType};
     use std::fmt;
+    use std::io::Write;
+    use std::process::{Child, ChildStdin, Command, Stdio};
     use std::time::Instant;
 
     #[derive(Clone, Copy, Debug)]
@@ -102,6 +105,23 @@ mod linux {
         format: SampleFormat,
     }
 
+    struct AplayOutput {
+        child: Child,
+        stdin: ChildStdin,
+    }
+
+    impl Drop for AplayOutput {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    enum MonitorOutput {
+        Alsa(AlsaOutput),
+        Aplay(AplayOutput),
+    }
+
     pub fn run_audio_loop(
         running: Arc<std::sync::atomic::AtomicBool>,
         settings: AudioSettings,
@@ -120,12 +140,20 @@ mod linux {
             expect_trs = false;
         }
 
+        // IMPORTANT: Never exit the audio thread just because inputs are missing/invalid.
+        // If audio stops entirely, receivers like OBS may "go dead" and require manual restarts.
+        // Instead, keep sending silence and periodically retry opening the inputs.
         let mut restart_last_attempt =
             Instant::now() - Duration::from_millis(settings.restart_cooldown_ms.max(1));
-        let mut effective_rate = settings.sample_rate;
+        let mut effective_rate = settings.sample_rate.max(1);
         let mut hdmi_channels: usize = 0;
         let mut trs_channels: usize = 0;
-        let (mut pcm_hdmi, mut pcm_trs) = match try_start_inputs(
+        let mut active_hdmi = false;
+        let mut active_trs = false;
+
+        let mut pcm_hdmi: Option<AlsaInput> = None;
+        let mut pcm_trs: Option<AlsaInput> = None;
+        if let Some((h, t)) = try_start_inputs(
             expect_hdmi,
             expect_trs,
             &settings,
@@ -133,23 +161,19 @@ mod linux {
             &mut hdmi_channels,
             &mut trs_channels,
         ) {
-            Some(v) => v,
-            None => {
-                println!("Audio pipeline error: No input devices could be started.");
-                return;
-            }
-        };
-
-        if pcm_hdmi.is_none() && pcm_trs.is_none() {
-            println!("No audio inputs available.");
-            return;
+            pcm_hdmi = h;
+            pcm_trs = t;
+            active_hdmi = pcm_hdmi.is_some();
+            active_trs = pcm_trs.is_some();
+        } else {
+            println!("Audio pipeline: no inputs started yet; sending silence until inputs become available.");
         }
 
-        let frame_size = settings.samples_per_channel;
+        let frame_size = settings.samples_per_channel.max(1);
         let output_channels = 2usize;
         let buffer_size = frame_size * output_channels;
         println!(
-            "Audio pipeline started. Rate: {}, Output Channels: {}, HDMI In: {}ch, TRS In: {}ch",
+            "Audio pipeline running. Rate: {}, Output Channels: {}, HDMI In: {}ch, TRS In: {}ch",
             effective_rate, output_channels, hdmi_channels, trs_channels
         );
 
@@ -162,6 +186,11 @@ mod linux {
         let mut hdmi_s16: Vec<i16> = Vec::new();
         let mut trs_s16: Vec<i16> = Vec::new();
         let mut monitor_s16: Vec<i16> = Vec::new();
+        let mut monitor_write_buf: Vec<u8> = Vec::new();
+        // Reuse send buffers to avoid per-frame heap allocations (important on Pi/OrangePi).
+        let mut planar_scratch = vec![0.0f32; buffer_size];
+        let mut packed_scratch: Vec<f32> = Vec::with_capacity(buffer_size);
+        let mut wire_scratch: Vec<u8> = Vec::with_capacity(buffer_size * 4);
         let mut consecutive_read_failures: u32 = 0;
         let mut read_failures_total: u32 = 0;
         let mut read_failures_hdmi: u32 = 0;
@@ -169,28 +198,104 @@ mod linux {
         let mut last_read_log = Instant::now();
         let mut last_level_log = Instant::now();
 
-        let pcm_monitor = if settings.monitor.enabled {
-            match open_pcm_playback(
-                &settings.monitor.device,
-                effective_rate,
-                output_channels as u32,
-                settings.arecord_buffer_usec,
-                settings.arecord_period_usec,
-            ) {
-                Ok(pcm) => Some(pcm),
-                Err(e) => {
-                    eprintln!(
-                        "Failed to open monitor output {}: {}",
-                        settings.monitor.device, e
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        // Monitor output must be robust: failure to open/write must not stop capture.
+        // If the configured device doesn't support the chosen format/rate, retry with fallbacks.
+        let mut pcm_monitor: Option<MonitorOutput> = None;
+        let mut last_monitor_attempt =
+            Instant::now() - Duration::from_millis(settings.restart_cooldown_ms.max(1));
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
+            // Periodically (re)open monitor output so it recovers without requiring OBS/app restarts.
+            if settings.monitor.enabled
+                && pcm_monitor.is_none()
+                && last_monitor_attempt.elapsed()
+                    >= Duration::from_millis(settings.restart_cooldown_ms.max(1))
+            {
+                last_monitor_attempt = Instant::now();
+                match open_monitor_output(&settings, effective_rate, output_channels as u32) {
+                    Ok(pcm) => pcm_monitor = Some(pcm),
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to open monitor output {}: {}",
+                            settings.monitor.device, e
+                        );
+                    }
+                }
+            }
+
+            // If no inputs are currently active, send silence and retry device start periodically.
+            if pcm_hdmi.is_none() && pcm_trs.is_none() {
+                mix_buf.fill(0.0);
+                if settings.monitor.enabled {
+                    let mut monitor_failed = false;
+                    if let Some(monitor) = pcm_monitor.as_mut() {
+                        let gain = settings.monitor.gain;
+                        for i in 0..buffer_size {
+                            monitor_buf[i] = (mix_buf[i] * gain).clamp(-1.0, 1.0);
+                        }
+                        if write_monitor_output(
+                            monitor,
+                            &monitor_buf,
+                            frame_size,
+                            output_channels,
+                            &mut monitor_s16,
+                            &mut monitor_write_buf,
+                        ) {
+                            // ok
+                        } else {
+                            monitor_failed = true;
+                        }
+                    }
+                    if monitor_failed {
+                        pcm_monitor = None;
+                    }
+                }
+                send_audio_frame(
+                    &settings,
+                    &send,
+                    &mix_buf,
+                    frame_size,
+                    output_channels,
+                    effective_rate,
+                    &mut planar_scratch,
+                    &mut packed_scratch,
+                    &mut wire_scratch,
+                );
+
+                if restart_last_attempt.elapsed()
+                    >= Duration::from_millis(settings.restart_cooldown_ms.max(1))
+                {
+                    restart_last_attempt = Instant::now();
+                    let mut new_rate = effective_rate;
+                    let mut new_hdmi_ch = hdmi_channels;
+                    let mut new_trs_ch = trs_channels;
+                    if let Some((h, t)) = try_start_inputs(
+                        expect_hdmi,
+                        expect_trs,
+                        &settings,
+                        &mut new_rate,
+                        &mut new_hdmi_ch,
+                        &mut new_trs_ch,
+                    ) {
+                        pcm_hdmi = h;
+                        pcm_trs = t;
+                        active_hdmi = pcm_hdmi.is_some();
+                        active_trs = pcm_trs.is_some();
+                        effective_rate = new_rate;
+                        hdmi_channels = new_hdmi_ch;
+                        trs_channels = new_trs_ch;
+                        println!(
+                            "Audio inputs started. Rate: {}, HDMI In: {}ch, TRS In: {}ch",
+                            effective_rate, hdmi_channels, trs_channels
+                        );
+                    }
+                }
+
+                thread::sleep(Duration::from_millis(
+                    (frame_size as u64 * 1000 / effective_rate as u64).max(1),
+                ));
+                continue;
+            }
             let mut hdmi_ok = false;
             let mut trs_ok = false;
 
@@ -202,7 +307,8 @@ mod linux {
                     hdmi_channels.max(1),
                     &mut hdmi_s16,
                 )
-                .is_ok()
+                .map(|n| n > 0)
+                .unwrap_or(false)
                 {
                     hdmi_ok = true;
                 }
@@ -216,25 +322,26 @@ mod linux {
                     trs_channels.max(1),
                     &mut trs_s16,
                 )
-                .is_ok()
+                .map(|n| n > 0)
+                .unwrap_or(false)
                 {
                     trs_ok = true;
                 }
             }
 
-            if expect_hdmi && !hdmi_ok {
+            if active_hdmi && !hdmi_ok {
                 read_failures_hdmi += 1;
             }
-            if expect_trs && !trs_ok {
+            if active_trs && !trs_ok {
                 read_failures_trs += 1;
             }
-            if (expect_hdmi && !hdmi_ok) || (expect_trs && !trs_ok) {
+            if (active_hdmi && !hdmi_ok) || (active_trs && !trs_ok) {
                 read_failures_total += 1;
             }
 
-            let all_expected_failed = (expect_hdmi || expect_trs)
-                && (!expect_hdmi || !hdmi_ok)
-                && (!expect_trs || !trs_ok);
+            let all_expected_failed = (active_hdmi || active_trs)
+                && (!active_hdmi || !hdmi_ok)
+                && (!active_trs || !trs_ok);
 
             if all_expected_failed {
                 consecutive_read_failures += 1;
@@ -255,6 +362,8 @@ mod linux {
                     ) {
                         pcm_hdmi = new_hdmi;
                         pcm_trs = new_trs;
+                        active_hdmi = pcm_hdmi.is_some();
+                        active_trs = pcm_trs.is_some();
                         hdmi_buf.resize(frame_size * hdmi_channels.max(1), 0.0);
                         trs_buf.resize(frame_size * trs_channels.max(1), 0.0);
                         println!(
@@ -278,6 +387,9 @@ mod linux {
                     frame_size,
                     output_channels,
                     effective_rate,
+                    &mut planar_scratch,
+                    &mut packed_scratch,
+                    &mut wire_scratch,
                 );
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -330,7 +442,7 @@ mod linux {
             last_mix_buf.copy_from_slice(&mix_buf);
             has_last_mix = true;
 
-            if let Some(pcm) = &pcm_monitor {
+            if let Some(monitor) = pcm_monitor.as_mut() {
                 let gain = settings.monitor.gain;
                 for i in 0..buffer_size {
                     let mut sample = mix_buf[i] * gain;
@@ -342,13 +454,16 @@ mod linux {
                     }
                     monitor_buf[i] = sample;
                 }
-                let _ = write_pcm(
-                    pcm,
+                if !write_monitor_output(
+                    monitor,
                     &monitor_buf,
                     frame_size,
                     output_channels,
                     &mut monitor_s16,
-                );
+                    &mut monitor_write_buf,
+                ) {
+                    pcm_monitor = None;
+                }
             }
 
             if last_level_log.elapsed() >= Duration::from_secs(5) {
@@ -387,46 +502,94 @@ mod linux {
                 frame_size,
                 output_channels,
                 effective_rate,
+                &mut planar_scratch,
+                &mut packed_scratch,
+                &mut wire_scratch,
             );
         }
     }
 
     fn send_audio_frame(
-        settings: &AudioSettings,
+        _settings: &AudioSettings,
         send: &SendCoordinator,
         interleaved: &[f32],
         samples_per_channel: usize,
         channels: usize,
         sample_rate: u32,
+        planar_scratch: &mut Vec<f32>,
+        packed_scratch: &mut Vec<f32>,
+        wire_scratch: &mut Vec<u8>,
     ) {
+        if planar_scratch.len() != interleaved.len() {
+            planar_scratch.resize(interleaved.len(), 0.0);
+        }
+        for ch in 0..channels {
+            let planar_offset = ch * samples_per_channel;
+            for s in 0..samples_per_channel {
+                planar_scratch[planar_offset + s] = interleaved[s * channels + ch];
+            }
+        }
+
+        // Match C# libomtnet OMTFPA1Codec.Encode behavior:
+        // - keep channel count in header
+        // - compact payload to only active (non-silent) channel planes
+        // - advertise active channels via bitmask
+        let active_mask = pack_active_planar_channels(
+            planar_scratch,
+            samples_per_channel,
+            channels,
+            packed_scratch,
+        );
+
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Keep audio/video in the same monotonic timebase (100ns units) to avoid receiver buffering.
-        frame.header.timestamp = crate::timebase::monotonic_100ns();
+        // Timestamp is assigned in SendCoordinator at send-time (same as C# path).
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
             samples_per_channel: samples_per_channel as i32,
             channels: channels as i32,
-            active_channels: active_channel_mask(channels),
+            active_channels: active_mask,
             reserved1: 0,
         });
 
-        let mut planar_buf = vec![0.0f32; interleaved.len()];
+        wire_scratch.clear();
+        wire_scratch.reserve(packed_scratch.len() * 4);
+        for &sample in packed_scratch.iter() {
+            wire_scratch.put_f32_le(sample);
+        }
+        frame.data = bytes::Bytes::copy_from_slice(wire_scratch);
+        frame.update_data_length();
+        send.enqueue_audio(frame);
+    }
+
+    fn pack_active_planar_channels(
+        planar: &[f32],
+        samples_per_channel: usize,
+        channels: usize,
+        out: &mut Vec<f32>,
+    ) -> u32 {
+        out.clear();
+        out.reserve(planar.len());
+        let mut mask = 0u32;
+
         for ch in 0..channels {
-            let planar_offset = ch * samples_per_channel;
-            for s in 0..samples_per_channel {
-                planar_buf[planar_offset + s] = interleaved[s * channels + ch];
+            let start = ch * samples_per_channel;
+            let end = start + samples_per_channel;
+            let plane = &planar[start..end];
+            let active = plane.iter().any(|v| *v != 0.0);
+            if !active {
+                continue;
             }
+
+            if ch >= 32 {
+                mask = u32::MAX;
+            } else {
+                mask |= 1u32 << ch;
+            }
+            out.extend_from_slice(plane);
         }
 
-        let mut byte_data = bytes::BytesMut::with_capacity(planar_buf.len() * 4);
-        for sample in &planar_buf {
-            byte_data.put_f32_le(*sample);
-        }
-        frame.data = byte_data.freeze();
-        frame.update_data_length();
-        let _ = settings;
-        send.enqueue_audio(frame);
+        mask
     }
 
     fn calculate_rms_db(buffer: &[f32], count: usize) -> f64 {
@@ -442,12 +605,19 @@ mod linux {
         20.0 * (rms + 1e-9).log10()
     }
 
-    fn build_device_candidates(device: &str) -> Vec<String> {
+    fn build_device_candidates(device: &str, include_default: bool) -> Vec<String> {
         let mut candidates = vec![device.to_string()];
         if let Some(suffix) = device.strip_prefix("hw:") {
             candidates.push(format!("plughw:{suffix}"));
             candidates.push(format!("plug:hw:{suffix}"));
         }
+        // For monitor playback we can safely try generic fallbacks.
+        // For capture inputs (HDMI/TRS), keep routing deterministic and do not silently
+        // fall back to an unrelated "default" source.
+        if include_default && !candidates.iter().any(|v| v == "default") {
+            candidates.push("default".to_string());
+        }
+        candidates.dedup();
         candidates
     }
 
@@ -471,7 +641,7 @@ mod linux {
             let mut opened_trs_channels = 0usize;
 
             if use_hdmi {
-                for device in build_device_candidates(&settings.hdmi_device) {
+                for device in build_device_candidates(&settings.hdmi_device, false) {
                     for ch in &channel_candidates {
                         if let Ok(input) = open_pcm_capture(
                             &device,
@@ -496,7 +666,7 @@ mod linux {
             }
 
             if use_trs {
-                for device in build_device_candidates(&settings.trs_device) {
+                for device in build_device_candidates(&settings.trs_device, false) {
                     for ch in &channel_candidates {
                         if let Ok(input) = open_pcm_capture(
                             &device,
@@ -556,7 +726,10 @@ mod linux {
         buffer_usec: u32,
         period_usec: u32,
     ) -> Result<AlsaInput, alsa::Error> {
-        if let Ok(pcm) = PCM::new(device, Direction::Capture, false) {
+        // Non-blocking read is critical when multiple capture devices are enabled (e.g. HDMI+TRS).
+        // A blocking read on an unplugged/idle device can stall the entire audio loop, which in
+        // turn can make receivers like OBS appear to "go dead".
+        if let Ok(pcm) = PCM::new(device, Direction::Capture, true) {
             if apply_hw_params(
                 &pcm,
                 rate,
@@ -573,7 +746,7 @@ mod linux {
                 });
             }
         }
-        let pcm = PCM::new(device, Direction::Capture, false)?;
+        let pcm = PCM::new(device, Direction::Capture, true)?;
         apply_hw_params(
             &pcm,
             rate,
@@ -595,7 +768,8 @@ mod linux {
         buffer_usec: u32,
         period_usec: u32,
     ) -> Result<AlsaOutput, alsa::Error> {
-        if let Ok(pcm) = PCM::new(device, Direction::Playback, false) {
+        // Playback is also opened non-blocking so a dead monitor device can't stall audio capture.
+        if let Ok(pcm) = PCM::new(device, Direction::Playback, true) {
             if apply_hw_params(
                 &pcm,
                 rate,
@@ -612,7 +786,7 @@ mod linux {
                 });
             }
         }
-        let pcm = PCM::new(device, Direction::Playback, false)?;
+        let pcm = PCM::new(device, Direction::Playback, true)?;
         apply_hw_params(
             &pcm,
             rate,
@@ -625,6 +799,160 @@ mod linux {
             pcm,
             format: SampleFormat::S16,
         })
+    }
+
+    fn open_monitor_output(
+        settings: &AudioSettings,
+        preferred_rate: u32,
+        preferred_channels: u32,
+    ) -> Result<MonitorOutput, String> {
+        // Unlike capture, playback devices frequently don't support f32; also many "hw:" devices
+        // only accept specific formats/rates. Try a conservative set of candidates.
+        let mut rate_candidates = vec![preferred_rate, settings.sample_rate, 48_000, 44_100];
+        rate_candidates.retain(|v| *v > 0);
+        rate_candidates.dedup();
+
+        let mut channel_candidates = vec![preferred_channels, 2, 1];
+        channel_candidates.retain(|v| *v > 0);
+        channel_candidates.dedup();
+
+        let mut last_err: Option<String> = None;
+        for dev in build_device_candidates(&settings.monitor.device, true) {
+            for rate in &rate_candidates {
+                for ch in &channel_candidates {
+                    match open_pcm_playback(
+                        &dev,
+                        *rate,
+                        *ch,
+                        settings.arecord_buffer_usec,
+                        settings.arecord_period_usec,
+                    ) {
+                        Ok(out) => {
+                            if dev != settings.monitor.device
+                                || *rate != preferred_rate
+                                || *ch != preferred_channels
+                            {
+                                println!(
+                                    "Monitor output opened on {} (rate={}, channels={}, format={})",
+                                    dev, rate, ch, out.format
+                                );
+                            }
+                            return Ok(MonitorOutput::Alsa(out));
+                        }
+                        Err(e) => last_err = Some(e.to_string()),
+                    }
+                }
+            }
+        }
+
+        // Final fallback: start `aplay` process in S16 mode.
+        for dev in build_device_candidates(&settings.monitor.device, true) {
+            for rate in &rate_candidates {
+                for ch in &channel_candidates {
+                    match open_aplay_output(&dev, *rate, *ch as usize) {
+                        Ok(out) => {
+                            println!(
+                                "Monitor output opened via aplay on {} (rate={}, channels={})",
+                                dev, rate, ch
+                            );
+                            return Ok(MonitorOutput::Aplay(out));
+                        }
+                        Err(e) => last_err = Some(e),
+                    }
+                }
+            }
+        }
+
+        Err(last_err
+            .unwrap_or_else(|| "monitor output unavailable (alsa/aplay open failed)".to_string()))
+    }
+
+    fn open_aplay_output(device: &str, rate: u32, channels: usize) -> Result<AplayOutput, String> {
+        let mut cmd = Command::new("aplay");
+        cmd.arg("-q")
+            .arg("-D")
+            .arg(device)
+            .arg("-t")
+            .arg("raw")
+            .arg("-f")
+            .arg("S16_LE")
+            .arg("-c")
+            .arg(channels.to_string())
+            .arg("-r")
+            .arg(rate.to_string())
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("aplay spawn failed for {}: {}", device, e))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "aplay stdin unavailable".to_string())?;
+        Ok(AplayOutput { child, stdin })
+    }
+
+    fn write_monitor_output(
+        output: &mut MonitorOutput,
+        buffer: &[f32],
+        frames: usize,
+        channels: usize,
+        scratch_i16: &mut Vec<i16>,
+        scratch_bytes: &mut Vec<u8>,
+    ) -> bool {
+        match output {
+            MonitorOutput::Alsa(out) => {
+                write_pcm(out, buffer, frames, channels, scratch_i16).is_ok()
+            }
+            MonitorOutput::Aplay(out) => {
+                write_aplay(out, buffer, frames, channels, scratch_i16, scratch_bytes).is_ok()
+            }
+        }
+    }
+
+    fn write_aplay(
+        output: &mut AplayOutput,
+        buffer: &[f32],
+        frames: usize,
+        channels: usize,
+        scratch_i16: &mut Vec<i16>,
+        scratch_bytes: &mut Vec<u8>,
+    ) -> Result<(), std::io::Error> {
+        if output.child.try_wait()?.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "aplay exited",
+            ));
+        }
+
+        let samples = frames * channels;
+        if scratch_i16.len() < samples {
+            scratch_i16.resize(samples, 0);
+        }
+        if scratch_bytes.len() < samples * 2 {
+            scratch_bytes.resize(samples * 2, 0);
+        }
+
+        for i in 0..samples {
+            let mut sample = buffer[i];
+            if sample > 1.0 {
+                sample = 1.0;
+            }
+            if sample < -1.0 {
+                sample = -1.0;
+            }
+            let v = (sample * i16::MAX as f32) as i16;
+            scratch_i16[i] = v;
+            let b = v.to_le_bytes();
+            scratch_bytes[i * 2] = b[0];
+            scratch_bytes[i * 2 + 1] = b[1];
+        }
+
+        output.stdin.write_all(&scratch_bytes[..samples * 2])?;
+        Ok(())
     }
 
     fn apply_hw_params(
@@ -661,12 +989,18 @@ mod linux {
         channels: usize,
         scratch_i16: &mut Vec<i16>,
     ) -> Result<usize, alsa::Error> {
+        // Clear to silence so partial reads don't leak old samples.
+        buffer.fill(0.0);
         match input.format {
             SampleFormat::Float32 => {
                 let io = input.pcm.io_f32()?;
                 match io.readi(buffer) {
                     Ok(count) => Ok(count),
                     Err(e) => {
+                        if e.errno() == Errno::EAGAIN {
+                            // Non-blocking capture: no data available right now.
+                            return Ok(0);
+                        }
                         if matches!(input.pcm.state(), State::XRun | State::Suspended) {
                             let _ = input.pcm.prepare();
                         }
@@ -680,9 +1014,14 @@ mod linux {
                     scratch_i16.resize(samples, 0);
                 }
                 let io = input.pcm.io_i16()?;
+                // Pre-clear scratch so partial reads become silence for the remainder.
+                scratch_i16[..samples].fill(0);
                 let count = match io.readi(&mut scratch_i16[..samples]) {
                     Ok(v) => v,
                     Err(e) => {
+                        if e.errno() == Errno::EAGAIN {
+                            return Ok(0);
+                        }
                         if matches!(input.pcm.state(), State::XRun | State::Suspended) {
                             let _ = input.pcm.prepare();
                         }
@@ -731,15 +1070,5 @@ mod linux {
                 Ok(count)
             }
         }
-    }
-
-    fn active_channel_mask(channels: usize) -> u32 {
-        if channels == 0 {
-            return 0;
-        }
-        if channels >= 32 {
-            return u32::MAX;
-        }
-        (1u32 << channels) - 1
     }
 }

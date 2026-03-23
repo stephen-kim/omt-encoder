@@ -7,6 +7,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
@@ -80,11 +81,23 @@ async fn get_config(State(state): State<WebState>) -> Json<Settings> {
 
 async fn update_config(
     State(state): State<WebState>,
-    Json(mut new_settings): Json<Settings>,
+    Json(payload): Json<Value>,
 ) -> Json<UpdateResult> {
     let old_settings = {
         let settings = state.settings.read().await;
         settings.clone()
+    };
+
+    let has_force_zero_timestamps = payload.pointer("/send/force_zero_timestamps").is_some();
+
+    let mut new_settings: Settings = match serde_json::from_value(payload) {
+        Ok(v) => v,
+        Err(e) => {
+            return Json(UpdateResult {
+                ok: false,
+                message: format!("Invalid config payload: {}", e),
+            })
+        }
     };
 
     normalize_audio_mode(&mut new_settings);
@@ -92,6 +105,9 @@ async fn update_config(
     // (e.g. when toggling checkboxes disables sections). Avoid nuking critical fields
     // and accidentally stopping unrelated pipelines.
     merge_empty_fields(&old_settings, &mut new_settings);
+    if !has_force_zero_timestamps {
+        new_settings.send.force_zero_timestamps = old_settings.send.force_zero_timestamps;
+    }
     clamp_send_settings(&mut new_settings);
     {
         let mut settings = state.settings.write().await;
@@ -115,15 +131,14 @@ async fn update_config(
 }
 
 fn normalize_audio_mode(settings: &mut Settings) {
-    match settings.audio.mode.trim().to_ascii_lowercase().as_str() {
-        "hdmi" => settings.audio.trs_device.clear(),
-        "trs" => settings.audio.hdmi_device.clear(),
-        "none" => {
-            settings.audio.hdmi_device.clear();
-            settings.audio.trs_device.clear();
-        }
-        _ => {}
-    }
+    // The UI already maps checkbox selection -> {mode, hdmi_device, trs_device}.
+    // Do NOT clear devices here; clearing can accidentally nuke inputs when toggling UI controls
+    // (and can cause capture to "go dead" for receivers like OBS).
+    let mode = settings.audio.mode.trim().to_ascii_lowercase();
+    settings.audio.mode = match mode.as_str() {
+        "none" | "hdmi" | "trs" | "both" => mode,
+        _ => "both".to_string(),
+    };
 }
 
 fn clamp_send_settings(settings: &mut Settings) {

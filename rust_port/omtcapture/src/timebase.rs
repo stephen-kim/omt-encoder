@@ -10,4 +10,3 @@ pub fn monotonic_100ns() -> i64 {
     let start = START.get_or_init(Instant::now);
     (start.elapsed().as_nanos() / 100) as i64
 }
-

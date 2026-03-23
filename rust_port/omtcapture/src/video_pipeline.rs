@@ -9,12 +9,14 @@ use crate::send_coordinator::SendCoordinator;
 use crate::settings::{PreviewSettings, VideoSettings};
 
 pub struct VideoPipeline {
-    settings: VideoSettings,
-    send: SendCoordinator,
-    preview: PreviewSettings,
+    settings: Arc<tokio::sync::RwLock<VideoSettings>>,
+    preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
     suggested_quality_hint: Arc<AtomicU8>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    restart_requested: Arc<std::sync::atomic::AtomicBool>,
+    preview_restart_requested: Arc<std::sync::atomic::AtomicBool>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
+    send: SendCoordinator,
 }
 
 impl VideoPipeline {
@@ -25,12 +27,14 @@ impl VideoPipeline {
         suggested_quality_hint: Arc<AtomicU8>,
     ) -> Self {
         VideoPipeline {
-            settings,
-            send,
-            preview,
+            settings: Arc::new(tokio::sync::RwLock::new(settings)),
+            preview: Arc::new(tokio::sync::RwLock::new(preview)),
             suggested_quality_hint,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            preview_restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             thread_handle: None,
+            send,
         }
     }
 
@@ -40,21 +44,62 @@ impl VideoPipeline {
         let running = self.running.clone();
         let settings = self.settings.clone();
         let preview = self.preview.clone();
+        let restart_requested = self.restart_requested.clone();
+        let preview_restart_requested = self.preview_restart_requested.clone();
         let send = self.send.clone();
         let suggested_quality_hint = self.suggested_quality_hint.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
             #[cfg(target_os = "linux")]
-            linux::run_video_loop(running, settings, preview, send, suggested_quality_hint);
+            {
+                // Match the C# sender behavior: keep trying to (re)start capture on transient
+                // V4L2 errors or format changes instead of exiting permanently.
+                while running.load(std::sync::atomic::Ordering::SeqCst) {
+                    // Pull the latest settings at the top of each (re)start.
+                    let current_settings = settings.blocking_read().clone();
+                    linux::run_video_loop(
+                        running.clone(),
+                        restart_requested.clone(),
+                        preview_restart_requested.clone(),
+                        current_settings,
+                        preview.clone(),
+                        send.clone(),
+                        suggested_quality_hint.clone(),
+                    );
+                    if running.load(std::sync::atomic::Ordering::SeqCst) {
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                }
+            }
 
             #[cfg(not(target_os = "linux"))]
-            stub::run_video_loop(running, settings, preview, send, suggested_quality_hint);
+            stub::run_video_loop(running, send, suggested_quality_hint);
         }));
+    }
+
+    pub fn update_video(&self, settings: VideoSettings) {
+        *self.settings.blocking_write() = settings;
+        // Restart capture/transform/vmx with the new config, but keep the server running and
+        // avoid forcing receivers (OBS) to restart.
+        self.restart_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn update_preview(&self, preview: PreviewSettings) {
+        *self.preview.blocking_write() = preview;
+        // Match C# sender: preview changes should NOT tear down capture/encode/network.
+        // Only restart the preview workers.
+        self.preview_restart_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn stop(&mut self) {
         self.running
             .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.restart_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.preview_restart_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
@@ -67,8 +112,6 @@ mod stub {
 
     pub fn run_video_loop(
         running: Arc<std::sync::atomic::AtomicBool>,
-        _settings: VideoSettings,
-        _preview: PreviewSettings,
         _send: SendCoordinator,
         _suggested_quality_hint: Arc<AtomicU8>,
     ) {
@@ -83,18 +126,20 @@ mod stub {
 mod linux {
     use super::*;
     use bytes::Bytes;
-    use libomtnet::{OMTCodec, OMTFrame, OMTFrameType, OMTVideoHeader};
+    use libomtnet::{OMTCodec, OMTFrame, OMTFrameType, OMTVideoFlags, OMTVideoHeader};
     use libvmx_sys::root;
+    use std::collections::HashSet;
     use std::io::{Read, Write};
     use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+    use std::sync::mpsc;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     use v4l::buffer::Type;
     use v4l::format::FourCC;
     use v4l::fraction::Fraction;
     use v4l::io::traits::CaptureStream;
     use v4l::prelude::*;
-    use v4l::video::Capture;
     use v4l::video::capture::Parameters as CaptureParameters;
+    use v4l::video::Capture;
 
     struct TransformContext {
         child: Child,
@@ -113,16 +158,18 @@ mod linux {
         preview_width: u32,
         preview_height: u32,
         preview_format: String,
-        stdin: ChildStdin,
-        child: Child,
         last_sent: Instant,
         interval_ms: u64,
+        tx: Option<mpsc::SyncSender<Bytes>>,
+        handle: Option<std::thread::JoinHandle<()>>,
     }
 
     pub fn run_video_loop(
         running: Arc<std::sync::atomic::AtomicBool>,
+        restart_requested: Arc<std::sync::atomic::AtomicBool>,
+        preview_restart_requested: Arc<std::sync::atomic::AtomicBool>,
         settings: VideoSettings,
-        preview: PreviewSettings,
+        preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
         send: SendCoordinator,
         suggested_quality_hint: Arc<AtomicU8>,
     ) {
@@ -130,6 +177,9 @@ mod linux {
             "Starting Linux V4L2 pipeline on {}...",
             settings.device_path
         );
+        // Clear any pending restart now that we're starting.
+        restart_requested.store(false, std::sync::atomic::Ordering::SeqCst);
+        preview_restart_requested.store(false, std::sync::atomic::Ordering::SeqCst);
 
         let dev = match Device::with_path(&settings.device_path) {
             Ok(d) => d,
@@ -147,16 +197,24 @@ mod linux {
             }
         };
 
+        let mut input_rate_n = settings.frame_rate_n.max(1);
+        let mut input_rate_d = settings.frame_rate_d.max(1);
+
         // Try to set capture frame interval (fps). Some devices ignore this, but when supported
         // it can reduce internal buffering and stabilize capture timing.
         if settings.frame_rate_n > 0 {
-            let interval = Fraction::new(
-                settings.frame_rate_d.max(1),
-                settings.frame_rate_n.max(1),
-            );
+            let interval =
+                Fraction::new(settings.frame_rate_d.max(1), settings.frame_rate_n.max(1));
             let params = CaptureParameters::new(interval);
             if let Err(e) = dev.set_params(&params) {
                 eprintln!("Warning: failed to set V4L2 capture params (fps): {}", e);
+            }
+        }
+        if let Ok(params) = dev.params() {
+            if params.interval.numerator > 0 && params.interval.denominator > 0 {
+                // v4l interval is time-per-frame (num/den sec), fps = den/num
+                input_rate_n = params.interval.denominator;
+                input_rate_d = params.interval.numerator;
             }
         }
 
@@ -179,23 +237,28 @@ mod linux {
         let output_width = if use_native {
             input_width
         } else {
-            settings.width
+            settings.width.max(1)
         };
         let output_height = if use_native {
             input_height
         } else {
-            settings.height
+            settings.height.max(1)
         };
         let output_rate_n = if use_native {
-            settings.frame_rate_n
+            input_rate_n
         } else {
-            settings.frame_rate_n
+            settings.frame_rate_n.max(1)
         };
         let output_rate_d = if use_native {
-            settings.frame_rate_d
+            input_rate_d
         } else {
-            settings.frame_rate_d
+            settings.frame_rate_d.max(1)
         };
+        let mut effective_output_codec = output_codec;
+        let mut effective_output_width = output_width;
+        let mut effective_output_height = output_height;
+        let mut effective_output_rate_n = output_rate_n;
+        let mut effective_output_rate_d = output_rate_d;
 
         let needs_transform = !use_native
             && (input_width != output_width
@@ -203,13 +266,15 @@ mod linux {
                 || input_codec as i32 != output_codec as i32);
 
         println!(
-            "Format: {} {}x{} -> {} {}x{} (native={})",
+            "Format: {} {}x{} {}fps -> {} {}x{} {}fps (native={})",
             codec_to_name(input_codec),
             input_width,
             input_height,
+            format!("{}/{}", input_rate_n, input_rate_d),
             codec_to_name(output_codec),
             output_width,
             output_height,
+            format!("{}/{}", output_rate_n, output_rate_d),
             use_native
         );
 
@@ -218,8 +283,8 @@ mod linux {
                 input_pix_fmt,
                 input_width,
                 input_height,
-                output_rate_n,
-                output_rate_d,
+                input_rate_n,
+                input_rate_d,
                 desired_pix_fmt,
                 output_width,
                 output_height,
@@ -236,7 +301,23 @@ mod linux {
 
         if needs_transform && transform.is_none() {
             eprintln!("Transform unavailable. Falling back to native output.");
+            // Match C# behavior on transform startup failure.
+            effective_output_codec = input_codec;
+            effective_output_width = input_width;
+            effective_output_height = input_height;
+            effective_output_rate_n = input_rate_n;
+            effective_output_rate_d = input_rate_d;
         }
+
+        // Determine what we will actually encode/send.
+        let encode_codec = effective_output_codec;
+        let encode_width = effective_output_width;
+        let encode_height = effective_output_height;
+        let encode_stride = if transform.is_some() {
+            codec_stride(encode_codec, encode_width)
+        } else {
+            fmt.stride
+        };
 
         // Fewer kernel-side buffers reduces capture->send latency.
         // 2 is usually safe at 1080p30 on Pi-class hardware; increase if you see V4L2 overruns.
@@ -248,27 +329,49 @@ mod linux {
             }
         };
 
-        let mut preview_sinks =
-            build_preview_sinks(&settings, &preview, input_width, input_height, input_fourcc);
+        let mut preview_sinks = {
+            let current_preview = preview.blocking_read().clone();
+            build_preview_sinks(
+                &settings,
+                &current_preview,
+                input_width,
+                input_height,
+                input_fourcc,
+            )
+        };
+        let mut preview_enabled = !preview_sinks.is_empty();
 
         let mut frame_count: usize = 0;
         let mut sent_bytes: usize = 0;
         let mut startup_debug_frames: usize = 0;
         let mut fps_window_start = Instant::now();
         let mut fps_window_frames: usize = 0;
+        let mut consecutive_capture_errors: u32 = 0;
+        let mut throttle_fps = !use_native
+            && (input_rate_n as u64 * effective_output_rate_d as u64
+                > effective_output_rate_n as u64 * input_rate_d as u64);
+        if needs_transform && transform.is_none() {
+            // Match C# behavior: when transform failed and we fall back to native format,
+            // disable software FPS throttling.
+            throttle_fps = false;
+        }
+        let output_frame_interval = Duration::from_secs_f64(
+            effective_output_rate_d as f64 / effective_output_rate_n as f64,
+        );
+        let mut last_output_frame_at = Instant::now() - output_frame_interval;
         let mut last_vmx_error_log = Instant::now() - Duration::from_secs(5);
         let mut vmx_instance: Option<*mut root::VMX_INSTANCE> = None;
         let mut vmx_buffer = vec![
             0u8;
-            (frame_size_bytes(output_codec, output_width, output_height) * 2)
+            (frame_size_bytes(encode_codec, encode_width, encode_height) * 2)
                 .max(8 * 1024 * 1024)
         ];
 
         let mut current_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
-        if codec_to_vmx_image_format(output_codec).is_some() {
+        if codec_to_vmx_image_format(encode_codec).is_some() {
             let size = root::VMX_SIZE {
-                width: output_width as i32,
-                height: output_height as i32,
+                width: encode_width as i32,
+                height: encode_height as i32,
             };
             unsafe {
                 let inst = root::VMX_Create(
@@ -286,11 +389,28 @@ mod linux {
         } else {
             eprintln!(
                 "Codec {} is not VMX encodable, sending raw video.",
-                codec_to_name(output_codec)
+                codec_to_name(encode_codec)
             );
         }
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
+            if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                // Caller requested a config reload.
+                break;
+            }
+            if preview_restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                preview_restart_requested.store(false, std::sync::atomic::Ordering::SeqCst);
+                let current_preview = preview.blocking_read().clone();
+                stop_preview_sinks(&mut preview_sinks);
+                preview_sinks = build_preview_sinks(
+                    &settings,
+                    &current_preview,
+                    input_width,
+                    input_height,
+                    input_fourcc,
+                );
+                preview_enabled = !preview_sinks.is_empty();
+            }
             let new_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
             if new_quality_level != current_quality_level {
                 if let Some(inst) = vmx_instance {
@@ -298,8 +418,8 @@ mod linux {
                         let previous_quality = root::VMX_GetQuality(inst);
                         root::VMX_Destroy(inst);
                         let size = root::VMX_SIZE {
-                            width: output_width as i32,
-                            height: output_height as i32,
+                            width: encode_width as i32,
+                            height: encode_height as i32,
                         };
                         let new_inst = root::VMX_Create(
                             size,
@@ -327,13 +447,37 @@ mod linux {
             }
 
             let (raw_data, _) = match stream.next() {
-                Ok(res) => res,
+                Ok(res) => {
+                    consecutive_capture_errors = 0;
+                    res
+                }
                 Err(e) => {
                     eprintln!("Failed to read video frame: {}", e);
+                    consecutive_capture_errors = consecutive_capture_errors.saturating_add(1);
+                    // Match C# behavior: recover by restarting capture if V4L2 keeps failing.
+                    if consecutive_capture_errors >= 20 {
+                        eprintln!("Too many consecutive video read errors; restarting capture.");
+                        break;
+                    }
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 }
             };
+            if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            if preview_restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                // Apply preview changes as soon as possible, but after we finish a V4L2 read to
+                // avoid leaving the stream in a weird state.
+                continue;
+            }
+            if throttle_fps {
+                let now = Instant::now();
+                if now.duration_since(last_output_frame_at) < output_frame_interval {
+                    continue;
+                }
+                last_output_frame_at = now;
+            }
 
             let (payload, frame_codec, frame_width, frame_height, frame_stride) =
                 if let Some(ref mut ctx) = transform {
@@ -343,6 +487,11 @@ mod linux {
                             raw_data.len(),
                             ctx.input_buf.len()
                         );
+                        consecutive_capture_errors = consecutive_capture_errors.saturating_add(1);
+                        if consecutive_capture_errors >= 20 {
+                            eprintln!("Too many short video frames; restarting capture.");
+                            break;
+                        }
                         continue;
                     }
                     let input_len = ctx.input_buf.len();
@@ -357,10 +506,10 @@ mod linux {
                     }
                     (
                         Bytes::copy_from_slice(&ctx.output_buf),
-                        output_codec,
-                        output_width,
-                        output_height,
-                        codec_stride(output_codec, output_width),
+                        effective_output_codec,
+                        effective_output_width,
+                        effective_output_height,
+                        codec_stride(effective_output_codec, effective_output_width),
                     )
                 } else {
                     (
@@ -400,6 +549,7 @@ mod linux {
                             Bytes::copy_from_slice(&vmx_buffer[..compressed_len as usize]),
                             OMTCodec::VMX1,
                             preview_total_len,
+                            video_flags_from_source_codec(frame_codec),
                         ))
                     } else {
                         if last_vmx_error_log.elapsed() >= Duration::from_secs(1) {
@@ -417,7 +567,7 @@ mod linux {
                 }
             } else {
                 if frame_codec == OMTCodec::VMX1 {
-                    Some((payload, frame_codec, None))
+                    Some((payload, frame_codec, None, 0))
                 } else {
                     if last_vmx_error_log.elapsed() >= Duration::from_secs(1) {
                         eprintln!(
@@ -430,21 +580,22 @@ mod linux {
                 }
             };
 
-            let Some((network_payload, network_codec, preview_data_length)) = network_frame else {
-                thread::sleep(Duration::from_millis(1));
+            let Some((network_payload, network_codec, preview_data_length, network_flags)) =
+                network_frame
+            else {
+                // No sleep needed: the next iteration blocks on stream.next() (V4L2 read).
                 continue;
             };
 
             let mut frame = OMTFrame::new(OMTFrameType::Video);
-            frame.header.timestamp = crate::timebase::monotonic_100ns();
             frame.video_header = Some(OMTVideoHeader {
                 codec: network_codec as i32,
                 width: frame_width as i32,
                 height: frame_height as i32,
-                frame_rate_n: output_rate_n as i32,
-                frame_rate_d: output_rate_d as i32,
+                frame_rate_n: effective_output_rate_n as i32,
+                frame_rate_d: effective_output_rate_d as i32,
                 aspect_ratio: frame_width as f32 / frame_height as f32,
-                flags: 0,
+                flags: network_flags,
                 color_space: 709,
             });
             frame.data = network_payload;
@@ -461,19 +612,16 @@ mod linux {
                     frame_height,
                     payload_len,
                     preview_data_length,
-                    output_rate_n,
-                    output_rate_d
+                    effective_output_rate_n,
+                    effective_output_rate_d
                 );
                 startup_debug_frames += 1;
             }
-            if send.enqueue_video(frame) {
-                frame_count += 1;
-                sent_bytes += payload_len;
-                fps_window_frames += 1;
-            } else {
-                thread::sleep(Duration::from_millis(1));
-                continue;
-            }
+            // enqueue_video always succeeds (latest-wins semantics).
+            send.enqueue_video(frame);
+            frame_count += 1;
+            sent_bytes += payload_len;
+            fps_window_frames += 1;
 
             if frame_count >= 60 {
                 println!("Sent {} frames, {} bytes.", frame_count, sent_bytes);
@@ -492,19 +640,31 @@ mod linux {
                 fps_window_frames = 0;
             }
 
-            if preview.enabled {
+            if preview_enabled {
                 let now = Instant::now();
+                // Only copy a new preview frame when at least one sink is ready to accept one.
+                let mut should_make_preview = false;
                 for sink in preview_sinks.iter_mut() {
-                    if sink.child.try_wait().ok().flatten().is_some() {
-                        let _ = restart_preview_sink(sink);
-                    }
                     if sink.interval_ms == 0
                         || now.duration_since(sink.last_sent).as_millis() as u64 >= sink.interval_ms
                     {
-                        if sink.stdin.write_all(raw_data).is_err() {
-                            let _ = restart_preview_sink(sink);
-                        } else {
-                            sink.last_sent = now;
+                        should_make_preview = true;
+                        break;
+                    }
+                }
+                if should_make_preview {
+                    let preview_bytes = Bytes::copy_from_slice(raw_data);
+                    for sink in preview_sinks.iter_mut() {
+                        if sink.interval_ms != 0
+                            && (now.duration_since(sink.last_sent).as_millis() as u64)
+                                < sink.interval_ms
+                        {
+                            continue;
+                        }
+                        if let Some(tx) = sink.tx.as_ref() {
+                            if tx.try_send(preview_bytes.clone()).is_ok() {
+                                sink.last_sent = now;
+                            }
                         }
                     }
                 }
@@ -521,12 +681,19 @@ mod linux {
             }
         }
 
-        for sink in preview_sinks.iter_mut() {
-            let _ = sink.child.kill();
-            let _ = sink.child.wait();
-        }
+        // Stop preview workers.
+        stop_preview_sinks(&mut preview_sinks);
 
         let _ = input_frame_bytes;
+    }
+
+    fn stop_preview_sinks(preview_sinks: &mut [PreviewSink]) {
+        for sink in preview_sinks.iter_mut() {
+            sink.tx.take();
+            if let Some(handle) = sink.handle.take() {
+                let _ = handle.join();
+            }
+        }
     }
 
     unsafe fn vmx_encode_frame(
@@ -539,14 +706,34 @@ mod linux {
         let ptr = data_ptr as *mut u8;
         match codec {
             OMTCodec::UYVY => root::VMX_EncodeUYVY(inst, ptr, stride, 0),
+            OMTCodec::UYVA => root::VMX_EncodeUYVA(inst, ptr, stride, 0),
             OMTCodec::YUY2 => root::VMX_EncodeYUY2(inst, ptr, stride, 0),
             OMTCodec::NV12 => {
                 let y_bytes = (stride as usize).saturating_mul(height as usize);
                 let uv_ptr = ptr.add(y_bytes);
                 root::VMX_EncodeNV12(inst, ptr, stride, uv_ptr, stride, 0)
             }
+            OMTCodec::YV12 => {
+                let y_stride = stride.max(1) as usize;
+                let y_bytes = y_stride.saturating_mul(height as usize);
+                let uv_stride = (y_stride / 2).max(1);
+                let uv_bytes = uv_stride.saturating_mul((height as usize) / 2);
+                let u_ptr = ptr.add(y_bytes);
+                let v_ptr = u_ptr.add(uv_bytes);
+                root::VMX_EncodeYV12(
+                    inst,
+                    ptr,
+                    y_stride as i32,
+                    u_ptr,
+                    uv_stride as i32,
+                    v_ptr,
+                    uv_stride as i32,
+                    0,
+                )
+            }
             OMTCodec::BGRA => root::VMX_EncodeBGRA(inst, ptr, stride, 0),
             OMTCodec::P216 => root::VMX_EncodeP216(inst, ptr, stride, 0),
+            OMTCodec::PA16 => root::VMX_EncodePA16(inst, ptr, stride, 0),
             _ => root::VMX_ERR_VMX_ERR_INVALID_CODEC_FORMAT,
         }
     }
@@ -554,12 +741,26 @@ mod linux {
     fn codec_to_vmx_image_format(codec: OMTCodec) -> Option<root::VMX_IMAGE_FORMAT> {
         match codec {
             OMTCodec::UYVY => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_UYVY),
+            OMTCodec::UYVA => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_UYVA),
             OMTCodec::YUY2 => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_YUY2),
             OMTCodec::NV12 => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_NV12),
+            OMTCodec::YV12 => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_YV12),
             OMTCodec::BGRA => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_BGRA),
             OMTCodec::P216 => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_P216),
+            OMTCodec::PA16 => Some(root::VMX_IMAGE_FORMAT_VMX_IMAGE_PA16),
             _ => None,
         }
+    }
+
+    fn video_flags_from_source_codec(codec: OMTCodec) -> u32 {
+        let mut flags = 0u32;
+        if matches!(codec, OMTCodec::UYVA | OMTCodec::PA16) {
+            flags |= OMTVideoFlags::Alpha as u32;
+        }
+        if matches!(codec, OMTCodec::P216 | OMTCodec::PA16) {
+            flags |= OMTVideoFlags::HighBitDepth as u32;
+        }
+        flags
     }
 
     fn vmx_profile_from_quality_level(level: u8) -> root::VMX_PROFILE {
@@ -567,6 +768,7 @@ mod linux {
             3.. => root::VMX_PROFILE_VMX_PROFILE_OMT_HQ,
             2 => root::VMX_PROFILE_VMX_PROFILE_OMT_SQ,
             1 => root::VMX_PROFILE_VMX_PROFILE_OMT_LQ,
+            // C# OMTVMX1Codec maps VMX_PROFILE_DEFAULT -> OMT_SQ internally.
             _ => root::VMX_PROFILE_VMX_PROFILE_OMT_SQ,
         }
     }
@@ -574,8 +776,11 @@ mod linux {
     fn codec_stride(codec: OMTCodec, width: u32) -> u32 {
         match codec {
             OMTCodec::NV12 => width,
+            OMTCodec::YV12 => width,
             OMTCodec::BGRA => width * 4,
+            OMTCodec::UYVA => width * 2,
             OMTCodec::P216 => width * 4,
+            OMTCodec::PA16 => width * 4,
             _ => width * 2,
         }
     }
@@ -663,12 +868,17 @@ mod linux {
     }
 
     fn parse_codec(codec: &str) -> Option<OMTCodec> {
-        match codec {
+        match codec.trim().to_ascii_uppercase().as_str() {
             "UYVY" => Some(OMTCodec::UYVY),
+            "UYVA" => Some(OMTCodec::UYVA),
             "YUY2" => Some(OMTCodec::YUY2),
+            "YUYV" => Some(OMTCodec::YUY2),
             "NV12" => Some(OMTCodec::NV12),
+            "YV12" => Some(OMTCodec::YV12),
+            "YU12" => Some(OMTCodec::YV12),
             "BGRA" => Some(OMTCodec::BGRA),
             "P216" => Some(OMTCodec::P216),
+            "PA16" => Some(OMTCodec::PA16),
             _ => None,
         }
     }
@@ -676,10 +886,13 @@ mod linux {
     fn codec_to_name(codec: OMTCodec) -> &'static str {
         match codec {
             OMTCodec::UYVY => "UYVY",
+            OMTCodec::UYVA => "UYVA",
             OMTCodec::YUY2 => "YUY2",
             OMTCodec::NV12 => "NV12",
+            OMTCodec::YV12 => "YV12",
             OMTCodec::BGRA => "BGRA",
             OMTCodec::P216 => "P216",
+            OMTCodec::PA16 => "PA16",
             OMTCodec::VMX1 => "VMX1",
             _ => "UNKNOWN",
         }
@@ -690,6 +903,7 @@ mod linux {
             OMTCodec::UYVY => "uyvy422",
             OMTCodec::YUY2 => "yuyv422",
             OMTCodec::NV12 => "nv12",
+            OMTCodec::YV12 => "yuv420p",
             OMTCodec::BGRA => "bgra",
             OMTCodec::P216 => "p216le",
             _ => "yuyv422",
@@ -701,6 +915,7 @@ mod linux {
             "uyvy422" => Some(OMTCodec::UYVY),
             "yuyv422" => Some(OMTCodec::YUY2),
             "nv12" => Some(OMTCodec::NV12),
+            "yuv420p" => Some(OMTCodec::YV12),
             "bgra" => Some(OMTCodec::BGRA),
             "p216le" => Some(OMTCodec::P216),
             _ => None,
@@ -711,8 +926,11 @@ mod linux {
         let pixels = width as usize * height as usize;
         match codec {
             OMTCodec::NV12 => pixels * 3 / 2,
+            OMTCodec::YV12 => pixels * 3 / 2,
             OMTCodec::BGRA => pixels * 4,
+            OMTCodec::UYVA => pixels * 3,
             OMTCodec::P216 => pixels * 4,
+            OMTCodec::PA16 => pixels * 6,
             _ => pixels * 2,
         }
     }
@@ -753,100 +971,134 @@ mod linux {
         };
         let mut sinks = Vec::new();
 
+        let mut seen = HashSet::new();
         for output in outputs {
-            let mut cmd = Command::new("ffmpeg");
-            let input_rate = if settings.frame_rate_d == 0 {
+            if !seen.insert(output.clone()) {
+                continue;
+            }
+
+            let input_rate = if preview.fps > 0 {
+                preview.fps.to_string()
+            } else if settings.frame_rate_d == 0 {
                 "30".to_string()
             } else {
-                format!("{}/{}", settings.frame_rate_n, settings.frame_rate_d)
+                format!(
+                    "{}/{}",
+                    settings.frame_rate_n.max(1),
+                    settings.frame_rate_d.max(1)
+                )
+            };
+            let (tx, rx) = mpsc::sync_channel::<Bytes>(1);
+            let (preview_width, preview_height) = try_get_framebuffer_size(&output)
+                .or_else(|| {
+                    if preview.width > 0 && preview.height > 0 {
+                        Some((preview.width, preview.height))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or((input_width, input_height));
+
+            let sink = PreviewSink {
+                output: output.clone(),
+                pix_fmt: pix_fmt.to_string(),
+                input_rate: input_rate.clone(),
+                input_width,
+                input_height,
+                preview_width,
+                preview_height,
+                preview_format: if preview.pixel_format.trim().is_empty() {
+                    "rgb565le".to_string()
+                } else {
+                    preview.pixel_format.clone()
+                },
+                last_sent: Instant::now(),
+                interval_ms,
+                tx: Some(tx),
+                handle: None,
             };
 
-            cmd.args([
-                "-loglevel",
-                "error",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                pix_fmt,
-                "-s",
-                &format!("{}x{}", input_width, input_height),
-                "-r",
-                &input_rate,
-                "-i",
-                "pipe:0",
-                "-vf",
-                &format!(
-                    "scale={}:{}:flags=fast_bilinear,format={}",
-                    preview.width, preview.height, preview.pixel_format
-                ),
-                "-f",
-                "fbdev",
-                &output,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-            if let Ok(mut child) = cmd.spawn() {
-                if let Some(stdin) = child.stdin.take() {
-                    sinks.push(PreviewSink {
-                        output,
-                        pix_fmt: pix_fmt.to_string(),
-                        input_rate: input_rate.clone(),
-                        input_width,
-                        input_height,
-                        preview_width: preview.width,
-                        preview_height: preview.height,
-                        preview_format: preview.pixel_format.clone(),
-                        stdin,
-                        child,
-                        last_sent: Instant::now(),
-                        interval_ms,
-                    });
-                }
-            }
+            sinks.push(spawn_preview_worker(sink, rx));
         }
 
         sinks
     }
 
-    fn restart_preview_sink(sink: &mut PreviewSink) -> Result<(), ()> {
-        let _ = sink.child.kill();
-        let _ = sink.child.wait();
+    fn spawn_preview_worker(mut sink: PreviewSink, rx: mpsc::Receiver<Bytes>) -> PreviewSink {
+        let handle = std::thread::spawn(move || {
+            let mut child: Option<Child> = None;
+            let mut stdin: Option<ChildStdin> = None;
 
-        let mut cmd = Command::new("ffmpeg");
-        cmd.args([
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            &sink.pix_fmt,
-            "-s",
-            &format!("{}x{}", sink.input_width, sink.input_height),
-            "-r",
-            &sink.input_rate,
-            "-i",
-            "pipe:0",
-            "-vf",
-            &format!(
-                "scale={}:{}:flags=fast_bilinear,format={}",
-                sink.preview_width, sink.preview_height, sink.preview_format
-            ),
-            "-f",
-            "fbdev",
-            &sink.output,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+            let mut start = || -> Result<(), ()> {
+                let mut cmd = Command::new("ffmpeg");
+                cmd.args([
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    &sink.pix_fmt,
+                    "-s",
+                    &format!("{}x{}", sink.input_width, sink.input_height),
+                    "-r",
+                    &sink.input_rate,
+                    "-i",
+                    "pipe:0",
+                    "-vf",
+                    &format!(
+                        "scale={}:{}:flags=fast_bilinear,format={}",
+                        sink.preview_width, sink.preview_height, sink.preview_format
+                    ),
+                    "-f",
+                    "fbdev",
+                    &sink.output,
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
 
-        let mut child = cmd.spawn().map_err(|_| ())?;
-        let stdin = child.stdin.take().ok_or(())?;
-        sink.stdin = stdin;
-        sink.child = child;
-        sink.last_sent = Instant::now();
-        Ok(())
+                let mut c = cmd.spawn().map_err(|_| ())?;
+                let s = c.stdin.take().ok_or(())?;
+                child = Some(c);
+                stdin = Some(s);
+                Ok(())
+            };
+
+            let mut ensure_running = || {
+                let exited = child
+                    .as_mut()
+                    .and_then(|c| c.try_wait().ok().flatten())
+                    .is_some();
+                if child.is_none() || exited {
+                    let _ = start();
+                }
+            };
+
+            ensure_running();
+
+            while let Ok(frame) = rx.recv() {
+                ensure_running();
+                if let Some(s) = stdin.as_mut() {
+                    if s.write_all(&frame).is_err() {
+                        // Restart on write failure.
+                        if let Some(mut c) = child.take() {
+                            let _ = c.kill();
+                            let _ = c.wait();
+                        }
+                        stdin = None;
+                        ensure_running();
+                    }
+                }
+            }
+
+            if let Some(mut c) = child.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        });
+
+        sink.handle = Some(handle);
+        sink
     }
 
     fn fourcc_to_codec(fourcc: FourCC) -> OMTCodec {
@@ -854,11 +1106,29 @@ mod linux {
             "UYVY" => OMTCodec::UYVY,
             "YUYV" | "YUY2" => OMTCodec::YUY2,
             "NV12" => OMTCodec::NV12,
+            "YV12" | "YU12" => OMTCodec::YV12,
             "P216" => OMTCodec::P216,
+            "PA16" => OMTCodec::PA16,
             "UYVA" => OMTCodec::UYVA,
             "BGRA" => OMTCodec::BGRA,
             _ => OMTCodec::UYVY,
         }
+    }
+
+    fn try_get_framebuffer_size(path: &str) -> Option<(u32, u32)> {
+        let fb = std::path::Path::new(path).file_name()?.to_str()?;
+        if !fb.starts_with("fb") {
+            return None;
+        }
+        let size_path = format!("/sys/class/graphics/{fb}/virtual_size");
+        let size = std::fs::read_to_string(size_path).ok()?;
+        let mut parts = size.trim().split(',');
+        let width = parts.next()?.trim().parse::<u32>().ok()?;
+        let height = parts.next()?.trim().parse::<u32>().ok()?;
+        if width == 0 || height == 0 {
+            return None;
+        }
+        Some((width, height))
     }
 
     #[allow(dead_code)]

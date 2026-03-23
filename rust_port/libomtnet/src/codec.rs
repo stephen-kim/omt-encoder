@@ -95,6 +95,11 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: OMTFrame, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        // Pre-reserve the full frame to avoid repeated reallocation during write.
+        let estimated =
+            OMTFrameHeader::SIZE + item.header.data_length.max(0) as usize + item.metadata.len();
+        dst.reserve(estimated);
+
         let mut wire_header = item.header.clone();
         let mut wire_video_header = item.video_header.clone();
         let ext_len = match wire_header.frame_type {
@@ -111,10 +116,43 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
             }
         }
 
+        // Always derive payload sizes from the actual buffers we will send to keep the header
+        // self-consistent. A mismatch here will desync the TCP frame parser on receivers.
+        let total_payload = item.data.len().saturating_add(item.metadata.len());
+
         // 1. Write Header
-        wire_header.write(&mut *dst);
+        // We'll finalize header lengths after deciding how much payload will be sent.
 
         // 2. Write Extended Header
+        if let Some(ref vh) = wire_video_header {
+            if wire_header.frame_type == OMTFrameType::Video {
+                // defer until after header write
+            }
+        } else if let Some(ref ah) = item.audio_header {
+            if wire_header.frame_type == OMTFrameType::Audio {
+                // defer until after header write
+            }
+        }
+
+        // 3. Write Data + Metadata (metadata goes last per OMT protocol)
+        // Respect preview data length by truncating payload bytes when requested.
+        let payload_target = (wire_header.data_length - ext_len).max(0) as usize;
+        let send_payload = payload_target.min(total_payload);
+
+        // IMPORTANT: On-wire payload ordering is `data` then `metadata`.
+        // If we truncate (preview mode), we must truncate from the *end* while preserving ordering.
+        // That means we never send metadata bytes unless we've sent the full `data` first.
+        let data_to_send = item.data.len().min(send_payload);
+        let metadata_to_send = send_payload.saturating_sub(data_to_send);
+
+        // Fix up header lengths to match what we're *actually* sending.
+        // In preview mode we may truncate before metadata; receivers rely on MetadataLength to split
+        // payload into `data` and `metadata`.
+        wire_header.metadata_length = (metadata_to_send.min(u16::MAX as usize)) as u16;
+        wire_header.data_length = ext_len + send_payload as i32;
+
+        // Now we can emit the header and extended header.
+        wire_header.write(&mut *dst);
         if let Some(ref vh) = wire_video_header {
             if wire_header.frame_type == OMTFrameType::Video {
                 vh.write(&mut *dst);
@@ -124,14 +162,6 @@ impl Encoder<OMTFrame> for OMTFrameCodec {
                 ah.write(&mut *dst);
             }
         }
-
-        // 3. Write Data + Metadata (metadata goes last per OMT protocol)
-        // Respect preview data length by truncating payload bytes when requested.
-        let payload_target = (wire_header.data_length - ext_len).max(0) as usize;
-        let total_payload = item.data.len() + item.metadata.len();
-        let send_payload = payload_target.min(total_payload);
-        let metadata_to_send = item.metadata.len().min(send_payload);
-        let data_to_send = send_payload.saturating_sub(metadata_to_send);
 
         if data_to_send > 0 {
             dst.extend_from_slice(&item.data[..data_to_send]);

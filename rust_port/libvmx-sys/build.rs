@@ -31,17 +31,24 @@ fn main() {
     let mut build = cc::Build::new();
     build
         .cpp(true)
+        // libvmx uses MSVC-style `__declspec(...)` in headers. GCC does not support this syntax,
+        // but Clang does with `-fdeclspec`/`-fms-extensions`.
+        // Our installer ensures clang is available on target devices (Pi/OrangePi).
+        .compiler("clang++")
         .include(&root_dir)
         .file(root_dir.join("vmxcodec.cpp"))
         //.file(root_dir.join("pch.cpp")) // Usually not needed if not using PCH in gcc/clang
         //.file(root_dir.join("dllmain.cpp")) // Windows specific usually
         .std("c++17") // Assuming C++17 or similar
         .flag("-w") // Silence noisy third-party warnings (libvmx)
+        .flag_if_supported("-fms-extensions")
+        .flag_if_supported("-fdeclspec")
         .flag_if_supported("-Wno-everything")
         .flag_if_supported("-Wno-strict-aliasing")
         .flag_if_supported("-Wno-sign-compare")
         .flag_if_supported("-Wno-unused-variable")
         .flag_if_supported("-Wno-unused-function")
+        .define("SSE2NEON_SUPPRESS_WARNINGS", Some("1"))
         .flag("-U_MSC_VER")
         .warnings(false)
         .extra_warnings(false);

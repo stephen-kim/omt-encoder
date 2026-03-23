@@ -60,7 +60,10 @@ async fn main() -> Result<()> {
     );
     video.start();
 
-    let _mdns_publisher = discovery::MdnsPublisher::start(&initial_settings.video.name, 6400);
+    let mdns_publisher = Arc::new(Mutex::new(discovery::MdnsPublisher::start(
+        &initial_settings.video.name,
+        6400,
+    )));
     let pipelines = Arc::new(Mutex::new(RuntimePipelines {
         audio,
         video,
@@ -88,6 +91,7 @@ async fn main() -> Result<()> {
     let tx_for_updates = tx.clone();
     let server_for_updates = Arc::new(server);
     let server_for_updates_task = Arc::clone(&server_for_updates);
+    let mdns_for_updates = Arc::clone(&mdns_publisher);
     tokio::spawn(async move {
         loop {
             if settings_rx.changed().await.is_err() {
@@ -109,6 +113,9 @@ async fn main() -> Result<()> {
                     SendCoordinator::new(tx_for_updates.clone(), new_settings.send.clone());
                 guard.audio = AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
                 guard.audio.start();
+                // Recreate video pipeline only when send settings force us to recreate the
+                // coordinator. For regular video/preview updates we use in-place restart flags
+                // to avoid making receivers like OBS require a restart.
                 guard.video = VideoPipeline::new(
                     new_settings.video.clone(),
                     new_settings.preview.clone(),
@@ -123,25 +130,26 @@ async fn main() -> Result<()> {
                         AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
                     guard.audio.start();
                 }
-                if video_changed || preview_changed {
-                    guard.video.stop();
-                    guard.video = VideoPipeline::new(
-                        new_settings.video.clone(),
-                        new_settings.preview.clone(),
-                        guard.send.clone(),
-                        suggested_quality_hint.clone(),
-                    );
-                    guard.video.start();
+                if video_changed {
+                    guard.video.update_video(new_settings.video.clone());
+                }
+                if preview_changed {
+                    guard.video.update_preview(new_settings.preview.clone());
                 }
             }
 
-            if old_name != new_settings.video.name {
-                server_for_updates_task
-                    .set_sender_info_xml(Some(build_sender_info_xml(&new_settings.video.name)))
-                    .await;
-            }
-
+            let name_changed = old_name != new_settings.video.name;
+            let new_name = new_settings.video.name.clone();
             guard.settings = new_settings;
+            drop(guard);
+
+            if name_changed {
+                server_for_updates_task
+                    .set_sender_info_xml(Some(build_sender_info_xml(&new_name)))
+                    .await;
+                let mut mdns = mdns_for_updates.lock().await;
+                *mdns = discovery::MdnsPublisher::start(&new_name, 6400);
+            }
         }
     });
 
@@ -164,6 +172,8 @@ async fn main() -> Result<()> {
         guard.audio.stop();
         guard.video.stop();
     }
+    // Keep publisher alive for process lifetime, then drop on shutdown.
+    drop(mdns_publisher);
 
     // Save settings on exit
     let final_settings = shared_settings.read().await;
