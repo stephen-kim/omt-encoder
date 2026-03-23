@@ -299,52 +299,53 @@ mod linux {
                 ));
                 continue;
             }
-            let mut hdmi_ok = false;
-            let mut trs_ok = false;
+            // Read from ALSA sources. Returns: GotData / NoDataYet (EAGAIN) / Error
+            let hdmi_result = if let Some(pcm) = &pcm_hdmi {
+                read_pcm(pcm, &mut hdmi_buf, frame_size, hdmi_channels.max(1), &mut hdmi_s16)
+            } else {
+                Ok(0)
+            };
+            let trs_result = if let Some(pcm) = &pcm_trs {
+                read_pcm(pcm, &mut trs_buf, frame_size, trs_channels.max(1), &mut trs_s16)
+            } else {
+                Ok(0)
+            };
 
-            if let Some(pcm) = &pcm_hdmi {
-                if read_pcm(
-                    pcm,
-                    &mut hdmi_buf,
-                    frame_size,
-                    hdmi_channels.max(1),
-                    &mut hdmi_s16,
-                )
-                .map(|n| n > 0)
-                .unwrap_or(false)
-                {
-                    hdmi_ok = true;
-                }
+            let hdmi_ok = hdmi_result.as_ref().map(|n| *n > 0).unwrap_or(false);
+            let trs_ok = trs_result.as_ref().map(|n| *n > 0).unwrap_or(false);
+            let hdmi_eagain = hdmi_result.as_ref().map(|n| *n == 0).unwrap_or(false);
+            let trs_eagain = trs_result.as_ref().map(|n| *n == 0).unwrap_or(false);
+            let hdmi_error = hdmi_result.is_err();
+            let trs_error = trs_result.is_err();
+
+            // If all active sources returned EAGAIN (no data ready yet), just wait briefly
+            // and retry. Do NOT send repeated/stale frames — that causes extreme stuttering.
+            let all_eagain = (active_hdmi || active_trs)
+                && (!active_hdmi || hdmi_eagain || hdmi_ok)
+                && (!active_trs || trs_eagain || trs_ok)
+                && !hdmi_ok && !trs_ok
+                && !hdmi_error && !trs_error;
+
+            if all_eagain {
+                // No data ready from any source — sleep briefly and retry.
+                thread::sleep(Duration::from_millis(1));
+                continue;
             }
 
-            if let Some(pcm) = &pcm_trs {
-                if read_pcm(
-                    pcm,
-                    &mut trs_buf,
-                    frame_size,
-                    trs_channels.max(1),
-                    &mut trs_s16,
-                )
-                .map(|n| n > 0)
-                .unwrap_or(false)
-                {
-                    trs_ok = true;
-                }
-            }
-
-            if active_hdmi && !hdmi_ok {
+            // Track actual read errors (not EAGAIN).
+            if active_hdmi && hdmi_error {
                 read_failures_hdmi += 1;
             }
-            if active_trs && !trs_ok {
+            if active_trs && trs_error {
                 read_failures_trs += 1;
             }
-            if (active_hdmi && !hdmi_ok) || (active_trs && !trs_ok) {
+            if (active_hdmi && hdmi_error) || (active_trs && trs_error) {
                 read_failures_total += 1;
             }
 
             let all_expected_failed = (active_hdmi || active_trs)
-                && (!active_hdmi || !hdmi_ok)
-                && (!active_trs || !trs_ok);
+                && (!active_hdmi || (!hdmi_ok && !hdmi_eagain))
+                && (!active_trs || (!trs_ok && !trs_eagain));
 
             if all_expected_failed {
                 consecutive_read_failures += 1;
@@ -378,11 +379,8 @@ mod linux {
                     }
                 }
 
-                if has_last_mix {
-                    mix_buf.copy_from_slice(&last_mix_buf);
-                } else {
-                    mix_buf.fill(0.0);
-                }
+                // Real error: send silence to keep stream alive.
+                mix_buf.fill(0.0);
                 send_audio_frame(
                     &settings,
                     &send,
