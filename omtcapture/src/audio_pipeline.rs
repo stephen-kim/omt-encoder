@@ -184,8 +184,6 @@ mod linux {
         let mut trs_buf = vec![0.0f32; frame_size * trs_channels.max(1)];
         let mut mix_buf = vec![0.0f32; buffer_size];
         let mut monitor_buf = vec![0.0f32; buffer_size];
-        let mut last_mix_buf = vec![0.0f32; buffer_size];
-        let mut has_last_mix = false;
         let mut hdmi_s16: Vec<i16> = Vec::new();
         let mut trs_s16: Vec<i16> = Vec::new();
         let mut monitor_s16: Vec<i16> = Vec::new();
@@ -327,8 +325,7 @@ mod linux {
                 && !hdmi_error && !trs_error;
 
             if all_eagain {
-                // No data ready from any source — sleep briefly and retry.
-                thread::sleep(Duration::from_millis(1));
+                // No data from any source (wait already happened inside read_pcm).
                 continue;
             }
 
@@ -440,8 +437,6 @@ mod linux {
                 mix_buf[i * 2] = left;
                 mix_buf[i * 2 + 1] = right;
             }
-            last_mix_buf.copy_from_slice(&mix_buf);
-            has_last_mix = true;
 
             if let Some(monitor) = pcm_monitor.as_mut() {
                 let gain = settings.monitor.gain;
@@ -983,6 +978,8 @@ mod linux {
         Ok(())
     }
 
+    /// Wait for data to be available, then read. Returns the number of frames read.
+    /// Returns Ok(0) only if wait times out (no data within timeout).
     fn read_pcm(
         input: &AlsaInput,
         buffer: &mut [f32],
@@ -992,6 +989,17 @@ mod linux {
     ) -> Result<usize, alsa::Error> {
         // Clear to silence so partial reads don't leak old samples.
         buffer.fill(0.0);
+
+        // Wait for data to be ready (up to 50ms). This avoids busy-looping on EAGAIN
+        // while still recovering quickly if a device disconnects.
+        if matches!(input.pcm.state(), State::XRun | State::Suspended) {
+            let _ = input.pcm.prepare();
+        }
+        if !input.pcm.wait(Some(50))? {
+            // Timeout: no data available within 50ms.
+            return Ok(0);
+        }
+
         match input.format {
             SampleFormat::Float32 => {
                 let io = input.pcm.io_f32()?;
@@ -999,7 +1007,6 @@ mod linux {
                     Ok(count) => Ok(count),
                     Err(e) => {
                         if is_eagain(&e) {
-                            // Non-blocking capture: no data available right now.
                             return Ok(0);
                         }
                         if matches!(input.pcm.state(), State::XRun | State::Suspended) {
@@ -1015,7 +1022,6 @@ mod linux {
                     scratch_i16.resize(samples, 0);
                 }
                 let io = input.pcm.io_i16()?;
-                // Pre-clear scratch so partial reads become silence for the remainder.
                 scratch_i16[..samples].fill(0);
                 let count = match io.readi(&mut scratch_i16[..samples]) {
                     Ok(v) => v,
