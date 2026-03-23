@@ -101,6 +101,7 @@ mod linux {
     struct AlsaInput {
         pcm: PCM,
         format: SampleFormat,
+        nonblock: bool,
     }
 
     struct AlsaOutput {
@@ -630,6 +631,9 @@ mod linux {
         let mut channel_candidates = vec![settings.channels.max(1), 2, 1];
         channel_candidates.dedup();
 
+        // Use non-blocking only when both sources are active (prevents one stalling the other).
+        let nonblock = use_hdmi && use_trs;
+
         for rate in rate_candidates {
             let mut hdmi_input: Option<AlsaInput> = None;
             let mut trs_input: Option<AlsaInput> = None;
@@ -645,6 +649,7 @@ mod linux {
                             *ch,
                             settings.arecord_buffer_usec,
                             settings.arecord_period_usec,
+                            nonblock,
                         ) {
                             println!(
                                 "Started audio input on {}. Rate: {}, Channels: {}, Format: {}",
@@ -670,6 +675,7 @@ mod linux {
                             *ch,
                             settings.arecord_buffer_usec,
                             settings.arecord_period_usec,
+                            nonblock,
                         ) {
                             println!(
                                 "Started audio input on {}. Rate: {}, Channels: {}, Format: {}",
@@ -721,11 +727,12 @@ mod linux {
         channels: u32,
         buffer_usec: u32,
         period_usec: u32,
+        nonblock: bool,
     ) -> Result<AlsaInput, alsa::Error> {
-        // Non-blocking read is critical when multiple capture devices are enabled (e.g. HDMI+TRS).
-        // A blocking read on an unplugged/idle device can stall the entire audio loop, which in
-        // turn can make receivers like OBS appear to "go dead".
-        if let Ok(pcm) = PCM::new(device, Direction::Capture, true) {
+        // Blocking mode gives the most reliable timing for single-source capture.
+        // Non-blocking is only needed when multiple capture devices are used (HDMI+TRS)
+        // to prevent one idle/unplugged device from stalling the entire audio loop.
+        if let Ok(pcm) = PCM::new(device, Direction::Capture, nonblock) {
             if apply_hw_params(
                 &pcm,
                 rate,
@@ -739,10 +746,11 @@ mod linux {
                 return Ok(AlsaInput {
                     pcm,
                     format: SampleFormat::Float32,
+                    nonblock,
                 });
             }
         }
-        let pcm = PCM::new(device, Direction::Capture, true)?;
+        let pcm = PCM::new(device, Direction::Capture, nonblock)?;
         apply_hw_params(
             &pcm,
             rate,
@@ -754,6 +762,7 @@ mod linux {
         Ok(AlsaInput {
             pcm,
             format: SampleFormat::S16,
+            nonblock,
         })
     }
 
@@ -1002,10 +1011,12 @@ mod linux {
             _ => {}
         }
 
-        // Wait for data to be ready (up to 50ms). This avoids busy-looping on EAGAIN
-        // while still recovering quickly if a device disconnects.
-        if !input.pcm.wait(Some(50))? {
-            return Ok(0);
+        // In non-blocking mode, wait for data before reading to avoid EAGAIN busy-loop.
+        // In blocking mode, readi() blocks internally so wait() is unnecessary.
+        if input.nonblock {
+            if !input.pcm.wait(Some(50))? {
+                return Ok(0);
+            }
         }
 
         match input.format {
