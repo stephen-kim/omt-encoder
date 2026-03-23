@@ -463,7 +463,7 @@ mod linux {
                 }
             }
 
-            if last_level_log.elapsed() >= Duration::from_secs(5) {
+            if last_level_log.elapsed() >= Duration::from_secs(30) {
                 let hdmi_db = if hdmi_ok {
                     calculate_rms_db(&hdmi_buf, frame_size * hdmi_channels.max(1))
                 } else {
@@ -481,7 +481,7 @@ mod linux {
                 );
                 last_level_log = Instant::now();
             }
-            if last_read_log.elapsed() >= Duration::from_secs(5) {
+            if last_read_log.elapsed() >= Duration::from_secs(30) {
                 println!(
                     "Audio read failures (last 5s): total={}, hdmi={}, trs={}",
                     read_failures_total, read_failures_hdmi, read_failures_trs

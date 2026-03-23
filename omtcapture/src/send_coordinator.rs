@@ -186,7 +186,7 @@ fn run_send_loop(inner: Arc<Inner>) {
 
         // Log stats periodically without acquiring any mutex.
         let now = Instant::now();
-        if now.duration_since(last_stats_log).as_secs_f64() >= 5.0 {
+        if now.duration_since(last_stats_log).as_secs_f64() >= 30.0 {
             last_stats_log = now;
             let ad = inner.audio_dropped.swap(0, Ordering::Relaxed);
             let vd = inner.video_dropped.swap(0, Ordering::Relaxed);

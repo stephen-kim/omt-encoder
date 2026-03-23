@@ -655,14 +655,14 @@ mod linux {
             sent_bytes += payload_len;
             fps_window_frames += 1;
 
-            if frame_count >= 60 {
+            if frame_count >= 900 {
                 println!("Sent {} frames, {} bytes.", frame_count, sent_bytes);
                 frame_count = 0;
                 sent_bytes = 0;
             }
 
             let elapsed = fps_window_start.elapsed().as_secs_f64();
-            if elapsed >= 2.0 {
+            if elapsed >= 30.0 {
                 let fps = fps_window_frames as f64 / elapsed;
                 println!(
                     "Video FPS: {:.1} (sent {} frames in {:.2}s)",
