@@ -1,4 +1,4 @@
-pub const NETWORK_SEND_BUFFER: usize = 65536;
+pub const NETWORK_SEND_BUFFER: usize = 1048576; // 1MB - large enough for full video frames
 pub const NETWORK_SEND_RECEIVE_BUFFER: usize = 65536;
 pub const NETWORK_RECEIVE_BUFFER: usize = 1048576 * 8; // 8MB
 
