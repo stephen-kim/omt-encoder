@@ -574,20 +574,6 @@ mod linux {
         }
     }
 
-    /// System monotonic clock in 100ns units (matching OBS os_gettime_ns() / 100).
-    /// NOT relative to process start — uses raw CLOCK_MONOTONIC so receiver
-    /// timestamps align with the system timebase.
-    fn system_monotonic_100ns() -> i64 {
-        let mut ts = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        unsafe {
-            libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
-        }
-        (ts.tv_sec as i64 * 10_000_000) + (ts.tv_nsec as i64 / 100)
-    }
-
     fn send_audio_frame(
         _settings: &AudioSettings,
         audio_tx: &broadcast::Sender<OMTFrame>,
@@ -622,9 +608,8 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Use system monotonic clock (like OBS's os_gettime_ns / 100).
-        // The receiver multiplies by 100 to get nanoseconds for OBS.
-        frame.header.timestamp = system_monotonic_100ns();
+        // Use system monotonic clock — same timebase as video for A/V sync.
+        frame.header.timestamp = crate::timebase::monotonic_100ns();
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
