@@ -330,8 +330,20 @@ async fn handle_connection(
     let mut send_task = tokio::spawn(async move {
         let mut wants_video = *rx_wants_video.borrow();
         let mut slow_write_count: u64 = 0;
+        let mut audio_frames_this_sec: u64 = 0;
         let mut last_write_diag = tokio::time::Instant::now();
+        let mut last_fps_log = tokio::time::Instant::now();
         loop {
+            if last_fps_log.elapsed().as_secs() >= 1 {
+                if audio_frames_this_sec > 0 {
+                    eprintln!(
+                        "CONN {} WRITER: {} audio frames/sec",
+                        write_conn_id, audio_frames_this_sec
+                    );
+                }
+                audio_frames_this_sec = 0;
+                last_fps_log = tokio::time::Instant::now();
+            }
             if last_write_diag.elapsed().as_secs() >= 10 {
                 if slow_write_count > 0 {
                     eprintln!(
@@ -386,6 +398,9 @@ async fn handle_connection(
                         let t = tokio::time::Instant::now();
                         sink.send(frame).await?;
                         let e = t.elapsed();
+                        if ft == OMTFrameType::Audio {
+                            audio_frames_this_sec += 1;
+                        }
                         if e.as_millis() > 10 {
                             slow_write_count += 1;
                             eprintln!(
@@ -415,6 +430,9 @@ async fn handle_connection(
                         let t = tokio::time::Instant::now();
                         sink.send(frame).await?;
                         let e = t.elapsed();
+                        if ft == OMTFrameType::Audio {
+                            audio_frames_this_sec += 1;
+                        }
                         if e.as_millis() > 10 {
                             slow_write_count += 1;
                             eprintln!(
