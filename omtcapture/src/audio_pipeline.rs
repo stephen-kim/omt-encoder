@@ -229,6 +229,8 @@ mod linux {
         let mut slow_read_count: u64 = 0;
         let mut slow_send_count: u64 = 0;
         let mut last_diag_log = Instant::now();
+        let mut consecutive_silence: u32 = 0;
+        let mut silence_events: u64 = 0;
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Diagnostics: log timing anomalies (stderr to avoid stdout lock contention).
@@ -244,15 +246,16 @@ mod linux {
             frame_counter += 1;
 
             if last_diag_log.elapsed().as_secs() >= 10 {
-                if xrun_count > 0 || slow_read_count > 0 || slow_send_count > 0 {
+                if xrun_count > 0 || slow_read_count > 0 || slow_send_count > 0 || silence_events > 0 {
                     eprintln!(
-                        "AUDIO DIAG 10s: xruns={}, slow_reads={}, slow_sends={}",
-                        xrun_count, slow_read_count, slow_send_count
+                        "AUDIO DIAG 10s: xruns={}, slow_reads={}, slow_sends={}, silence_events={}",
+                        xrun_count, slow_read_count, slow_send_count, silence_events
                     );
                 }
                 xrun_count = 0;
                 slow_read_count = 0;
                 slow_send_count = 0;
+                silence_events = 0;
                 last_diag_log = Instant::now();
             }
 
@@ -471,6 +474,23 @@ mod linux {
                     .map(|s| (s * gain).clamp(-1.0, 1.0))
                     .collect();
                 let _ = tx.try_send(mon);
+            }
+
+            // Detect silence in outgoing audio to distinguish data vs transport issues.
+            let peak = mix_buf.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            if peak < 1e-6 {
+                consecutive_silence += 1;
+            } else {
+                if consecutive_silence >= 3 {
+                    silence_events += 1;
+                    eprintln!(
+                        "AUDIO DIAG: {} consecutive silence frames ended at frame {} ({}ms gap)",
+                        consecutive_silence,
+                        frame_counter,
+                        consecutive_silence as u64 * frame_size as u64 * 1000 / effective_rate as u64
+                    );
+                }
+                consecutive_silence = 0;
             }
 
             let send_start = Instant::now();
