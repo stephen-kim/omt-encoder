@@ -79,7 +79,7 @@ impl Default for AudioSettings {
             channels: 2,
             samples_per_channel: 480,
             mix_gain: 0.5,
-            arecord_buffer_usec: 100000,
+            arecord_buffer_usec: 200000,
             arecord_period_usec: 20000,
             restart_after_failed_reads: 5,
             restart_cooldown_ms: 1000,
@@ -99,7 +99,7 @@ pub struct SendSettings {
 impl Default for SendSettings {
     fn default() -> Self {
         Self {
-            audio_queue_capacity: 8,
+            audio_queue_capacity: 32,
             video_queue_capacity: 1,
             // Match C# sender defaults: lower receiver buffering for "live" use.
             force_zero_timestamps: true,

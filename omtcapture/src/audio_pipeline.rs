@@ -195,11 +195,8 @@ mod linux {
         let mut hdmi_buf = vec![0.0f32; frame_size * hdmi_channels.max(1)];
         let mut trs_buf = vec![0.0f32; frame_size * trs_channels.max(1)];
         let mut mix_buf = vec![0.0f32; buffer_size];
-        let mut monitor_buf = vec![0.0f32; buffer_size];
         let mut hdmi_s16: Vec<i16> = Vec::new();
         let mut trs_s16: Vec<i16> = Vec::new();
-        let mut monitor_s16: Vec<i16> = Vec::new();
-        let mut monitor_write_buf: Vec<u8> = Vec::new();
         // Reuse send buffers to avoid per-frame heap allocations (important on Pi/OrangePi).
         let mut planar_scratch = vec![0.0f32; buffer_size];
         let mut packed_scratch: Vec<f32> = Vec::with_capacity(buffer_size);
@@ -211,57 +208,32 @@ mod linux {
         let mut last_read_log = Instant::now();
         let mut last_level_log = Instant::now();
 
-        // Monitor output must be robust: failure to open/write must not stop capture.
-        // If the configured device doesn't support the chosen format/rate, retry with fallbacks.
-        let mut pcm_monitor: Option<MonitorOutput> = None;
-        let mut last_monitor_attempt =
-            Instant::now() - Duration::from_millis(settings.restart_cooldown_ms.max(1));
+        // Monitor output runs on a separate thread to prevent blocking the capture loop.
+        // If the monitor can't keep up, frames are silently dropped (best-effort).
+        let monitor_tx: Option<std::sync::mpsc::SyncSender<Vec<f32>>> = if settings.monitor.enabled
+        {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(4);
+            let mon_settings = settings.clone();
+            let mon_running = running.clone();
+            thread::spawn(move || {
+                run_monitor_thread(mon_running, mon_settings, effective_rate, output_channels, rx);
+            });
+            Some(tx)
+        } else {
+            None
+        };
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
-            // Periodically (re)open monitor output so it recovers without requiring OBS/app restarts.
-            if settings.monitor.enabled
-                && pcm_monitor.is_none()
-                && last_monitor_attempt.elapsed()
-                    >= Duration::from_millis(settings.restart_cooldown_ms.max(1))
-            {
-                last_monitor_attempt = Instant::now();
-                match open_monitor_output(&settings, effective_rate, output_channels as u32) {
-                    Ok(pcm) => pcm_monitor = Some(pcm),
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to open monitor output {}: {}",
-                            settings.monitor.device, e
-                        );
-                    }
-                }
-            }
-
             // If no inputs are currently active, send silence and retry device start periodically.
             if pcm_hdmi.is_none() && pcm_trs.is_none() {
                 mix_buf.fill(0.0);
-                if settings.monitor.enabled {
-                    let mut monitor_failed = false;
-                    if let Some(monitor) = pcm_monitor.as_mut() {
-                        let gain = settings.monitor.gain;
-                        for i in 0..buffer_size {
-                            monitor_buf[i] = (mix_buf[i] * gain).clamp(-1.0, 1.0);
-                        }
-                        if write_monitor_output(
-                            monitor,
-                            &monitor_buf,
-                            frame_size,
-                            output_channels,
-                            &mut monitor_s16,
-                            &mut monitor_write_buf,
-                        ) {
-                            // ok
-                        } else {
-                            monitor_failed = true;
-                        }
-                    }
-                    if monitor_failed {
-                        pcm_monitor = None;
-                    }
+                if let Some(ref tx) = monitor_tx {
+                    let gain = settings.monitor.gain;
+                    let mon: Vec<f32> = mix_buf
+                        .iter()
+                        .map(|s| (s * gain).clamp(-1.0, 1.0))
+                        .collect();
+                    let _ = tx.try_send(mon);
                 }
                 send_audio_frame(
                     &settings,
@@ -450,28 +422,13 @@ mod linux {
                 mix_buf[i * 2 + 1] = right;
             }
 
-            if let Some(monitor) = pcm_monitor.as_mut() {
+            if let Some(ref tx) = monitor_tx {
                 let gain = settings.monitor.gain;
-                for i in 0..buffer_size {
-                    let mut sample = mix_buf[i] * gain;
-                    if sample > 1.0 {
-                        sample = 1.0;
-                    }
-                    if sample < -1.0 {
-                        sample = -1.0;
-                    }
-                    monitor_buf[i] = sample;
-                }
-                if !write_monitor_output(
-                    monitor,
-                    &monitor_buf,
-                    frame_size,
-                    output_channels,
-                    &mut monitor_s16,
-                    &mut monitor_write_buf,
-                ) {
-                    pcm_monitor = None;
-                }
+                let mon: Vec<f32> = mix_buf
+                    .iter()
+                    .map(|s| (s * gain).clamp(-1.0, 1.0))
+                    .collect();
+                let _ = tx.try_send(mon);
             }
 
             // No logging in the audio hot loop — any println! can cause
@@ -488,6 +445,58 @@ mod linux {
                 &mut packed_scratch,
                 &mut wire_scratch,
             );
+        }
+    }
+
+    fn run_monitor_thread(
+        running: Arc<std::sync::atomic::AtomicBool>,
+        settings: AudioSettings,
+        effective_rate: u32,
+        output_channels: usize,
+        rx: std::sync::mpsc::Receiver<Vec<f32>>,
+    ) {
+        let frame_size = settings.samples_per_channel.max(1);
+        let mut pcm_monitor: Option<MonitorOutput> = None;
+        let mut last_monitor_attempt =
+            Instant::now() - Duration::from_millis(settings.restart_cooldown_ms.max(1));
+        let mut monitor_s16: Vec<i16> = Vec::new();
+        let mut monitor_write_buf: Vec<u8> = Vec::new();
+
+        while running.load(std::sync::atomic::Ordering::SeqCst) {
+            let buffer = match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(buf) => buf,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+
+            if pcm_monitor.is_none()
+                && last_monitor_attempt.elapsed()
+                    >= Duration::from_millis(settings.restart_cooldown_ms.max(1))
+            {
+                last_monitor_attempt = Instant::now();
+                match open_monitor_output(&settings, effective_rate, output_channels as u32) {
+                    Ok(pcm) => pcm_monitor = Some(pcm),
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to open monitor output {}: {}",
+                            settings.monitor.device, e
+                        );
+                    }
+                }
+            }
+
+            if let Some(monitor) = pcm_monitor.as_mut() {
+                if !write_monitor_output(
+                    monitor,
+                    &buffer,
+                    frame_size,
+                    output_channels,
+                    &mut monitor_s16,
+                    &mut monitor_write_buf,
+                ) {
+                    pcm_monitor = None;
+                }
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ pub struct SendCoordinator {
 
 impl SendCoordinator {
     pub fn new(tx: ServerSenders, settings: SendSettings) -> Self {
-        let audio_capacity = clamp(settings.audio_queue_capacity, 1, 16);
+        let audio_capacity = clamp(settings.audio_queue_capacity, 1, 64);
         let video_capacity = clamp(settings.video_queue_capacity, 1, 8);
         // Channel capacity = total frames that can be in-flight.
         let channel_capacity = audio_capacity + video_capacity + 4;
@@ -97,8 +98,8 @@ fn run_send_loop(inner: Arc<Inner>, receiver: mpsc::Receiver<TaggedFrame>) {
     let mut audio_budget = AUDIO_BURST_BEFORE_VIDEO;
     let mut last_stats_log = Instant::now();
     // Local staging queues for priority scheduling.
-    let mut audio_pending: Vec<OMTFrame> = Vec::new();
-    let mut video_pending: Vec<OMTFrame> = Vec::new();
+    let mut audio_pending: VecDeque<OMTFrame> = VecDeque::new();
+    let mut video_pending: VecDeque<OMTFrame> = VecDeque::new();
 
     while inner.running.load(Ordering::SeqCst) {
         // Drain all available frames from the channel (non-blocking after first).
@@ -106,8 +107,8 @@ fn run_send_loop(inner: Arc<Inner>, receiver: mpsc::Receiver<TaggedFrame>) {
             // Block on first frame to avoid busy-loop.
             match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(frame) => match frame {
-                    TaggedFrame::Audio(f) => audio_pending.push(f),
-                    TaggedFrame::Video(f) => video_pending.push(f),
+                    TaggedFrame::Audio(f) => audio_pending.push_back(f),
+                    TaggedFrame::Video(f) => video_pending.push_back(f),
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -116,17 +117,16 @@ fn run_send_loop(inner: Arc<Inner>, receiver: mpsc::Receiver<TaggedFrame>) {
         // Drain remaining without blocking.
         while let Ok(frame) = receiver.try_recv() {
             match frame {
-                TaggedFrame::Audio(f) => audio_pending.push(f),
-                TaggedFrame::Video(f) => video_pending.push(f),
+                TaggedFrame::Audio(f) => audio_pending.push_back(f),
+                TaggedFrame::Video(f) => video_pending.push_back(f),
             }
         }
 
         // Trim video to capacity (keep newest).
         let vcap = inner.settings.video_queue_capacity;
-        if video_pending.len() > vcap {
-            let drop_count = video_pending.len() - vcap;
-            video_pending.drain(..drop_count);
-            inner.video_dropped.fetch_add(drop_count, Ordering::Relaxed);
+        while video_pending.len() > vcap {
+            video_pending.pop_front();
+            inner.video_dropped.fetch_add(1, Ordering::Relaxed);
         }
 
         // Send with audio burst scheduling.
@@ -137,18 +137,18 @@ fn run_send_loop(inner: Arc<Inner>, receiver: mpsc::Receiver<TaggedFrame>) {
             let has_video = !video_pending.is_empty();
 
             if has_video && (!has_audio || audio_budget == 0) {
-                if let Some(frame) = pop_front(&mut video_pending) {
+                if let Some(frame) = video_pending.pop_front() {
                     send_frame(&inner, frame, false);
                     audio_budget = AUDIO_BURST_BEFORE_VIDEO;
                     sent_any = true;
                 }
             } else if has_audio {
-                if let Some(frame) = pop_front(&mut audio_pending) {
+                if let Some(frame) = audio_pending.pop_front() {
                     send_frame(&inner, frame, true);
                     audio_budget = audio_budget.saturating_sub(1);
                     sent_any = true;
                 }
-            } else if let Some(frame) = pop_front(&mut video_pending) {
+            } else if let Some(frame) = video_pending.pop_front() {
                 send_frame(&inner, frame, false);
                 audio_budget = AUDIO_BURST_BEFORE_VIDEO;
                 sent_any = true;
@@ -193,14 +193,6 @@ fn send_frame(inner: &Inner, mut frame: OMTFrame, is_audio: bool) {
         } else {
             inner.video_send_zero.fetch_add(1, Ordering::Relaxed);
         }
-    }
-}
-
-fn pop_front<T>(v: &mut Vec<T>) -> Option<T> {
-    if v.is_empty() {
-        None
-    } else {
-        Some(v.remove(0))
     }
 }
 

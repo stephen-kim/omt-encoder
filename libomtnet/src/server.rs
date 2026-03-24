@@ -250,7 +250,7 @@ async fn handle_connection(
     //   frame over building latency.
     // - Audio/metadata are queued with a small bound; if full, we drop to avoid runaway latency.
     let (tx_video_latest, mut rx_video_latest) = watch::channel::<Option<OMTFrame>>(None);
-    let (tx_other, mut rx_other) = mpsc::channel::<OMTFrame>(64);
+    let (tx_other, mut rx_other) = mpsc::channel::<OMTFrame>(512);
 
     // Producer: Broadcast -> per-connection channels (non-blocking).
     let prod_state = Arc::clone(&state);

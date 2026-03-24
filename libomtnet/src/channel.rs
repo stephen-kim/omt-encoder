@@ -50,7 +50,7 @@ fn apply_socket_options(stream: &TcpStream) -> io::Result<()> {
         fd,
         libc::SOL_SOCKET,
         libc::SO_RCVBUF,
-        constants::NETWORK_SEND_RECEIVE_BUFFER as libc::c_int,
+        constants::NETWORK_RECEIVE_BUFFER as libc::c_int,
     )?;
     set_sockopt_int(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1)?;
 
