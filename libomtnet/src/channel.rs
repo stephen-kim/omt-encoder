@@ -52,14 +52,8 @@ fn apply_socket_options(stream: &TcpStream) -> io::Result<()> {
         libc::SO_RCVBUF,
         constants::NETWORK_RECEIVE_BUFFER as libc::c_int,
     )?;
-    set_sockopt_int(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1)?;
-
-    #[cfg(target_os = "linux")]
-    {
-        // Keepalive parity with C# sender path: idle ~=5s, interval ~=5s.
-        let _ = set_sockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, 5);
-        let _ = set_sockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, 5);
-    }
+    // No TCP keepalive — dead connections are detected by send/recv failures.
+    // Keepalive probes were causing periodic audio glitches.
 
     Ok(())
 }

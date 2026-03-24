@@ -139,11 +139,7 @@ fn configure_sender_socket(socket: &TcpStream) {
         // We don't know the subscription yet, so pick the larger receive buffer.
         let _ = sock.set_recv_buffer_size(NETWORK_RECEIVE_BUFFER.max(NETWORK_SEND_RECEIVE_BUFFER));
 
-        // Light keepalive helps detect dead TCP sessions without requiring OBS restarts.
-        let _ = sock.set_keepalive(true);
-        let _ = sock.set_tcp_keepalive(
-            &socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(5)),
-        );
+        // No keepalive — dead connections detected by send/recv failures.
     }
 }
 
@@ -202,7 +198,6 @@ async fn handle_connection(
         let sock = SockRef::from(&socket);
         let _ = sock.set_send_buffer_size(NETWORK_SEND_BUFFER);
         let _ = sock.set_recv_buffer_size(NETWORK_RECEIVE_BUFFER);
-        let _ = sock.set_keepalive(true);
     }
 
     let channel = OMTChannel::new(socket);
