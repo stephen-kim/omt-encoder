@@ -508,6 +508,7 @@ mod linux {
                 &mut planar_scratch,
                 &mut packed_scratch,
                 &mut wire_scratch,
+                &mut audio_timestamp,
             );
             let send_elapsed = send_start.elapsed();
             if send_elapsed.as_millis() > 5 {
