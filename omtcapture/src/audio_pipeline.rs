@@ -2,21 +2,22 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::send_coordinator::SendCoordinator;
 use crate::settings::AudioSettings;
+use libomtnet::OMTFrame;
+use tokio::sync::broadcast;
 
 pub struct AudioPipeline {
     settings: AudioSettings,
-    send: SendCoordinator,
+    audio_tx: broadcast::Sender<OMTFrame>,
     running: Arc<std::sync::atomic::AtomicBool>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl AudioPipeline {
-    pub fn new(settings: AudioSettings, send: SendCoordinator) -> Self {
+    pub fn new(settings: AudioSettings, audio_tx: broadcast::Sender<OMTFrame>) -> Self {
         AudioPipeline {
             settings,
-            send,
+            audio_tx,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             thread_handle: None,
         }
@@ -32,7 +33,7 @@ impl AudioPipeline {
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let running = self.running.clone();
         let settings = self.settings.clone();
-        let send = self.send.clone();
+        let audio_tx = self.audio_tx.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
             // Set real-time scheduling for the audio thread to prevent glitches
@@ -47,10 +48,10 @@ impl AudioPipeline {
             }
 
             #[cfg(target_os = "linux")]
-            linux::run_audio_loop(running, settings, send);
+            linux::run_audio_loop(running, settings, audio_tx);
 
             #[cfg(not(target_os = "linux"))]
-            stub::run_audio_loop(running, settings, send);
+            stub::run_audio_loop(running, settings, audio_tx);
         }));
     }
 
@@ -69,7 +70,7 @@ mod stub {
     pub fn run_audio_loop(
         running: Arc<std::sync::atomic::AtomicBool>,
         _settings: AudioSettings,
-        _send: SendCoordinator,
+        _audio_tx: broadcast::Sender<OMTFrame>,
     ) {
         println!("Available on Linux only. Stubbing audio loop for macOS.");
         while running.load(std::sync::atomic::Ordering::SeqCst) {
@@ -140,7 +141,7 @@ mod linux {
     pub fn run_audio_loop(
         running: Arc<std::sync::atomic::AtomicBool>,
         settings: AudioSettings,
-        send: SendCoordinator,
+        audio_tx: broadcast::Sender<OMTFrame>,
     ) {
         println!("Starting Linux ALSA pipeline...");
         let mode = settings.mode.trim().to_lowercase();
@@ -272,7 +273,7 @@ mod linux {
                 }
                 send_audio_frame(
                     &settings,
-                    &send,
+                    &audio_tx,
                     &mix_buf,
                     frame_size,
                     output_channels,
@@ -409,7 +410,7 @@ mod linux {
                 mix_buf.fill(0.0);
                 send_audio_frame(
                     &settings,
-                    &send,
+                    &audio_tx,
                     &mix_buf,
                     frame_size,
                     output_channels,
@@ -496,7 +497,7 @@ mod linux {
             let send_start = Instant::now();
             send_audio_frame(
                 &settings,
-                &send,
+                &audio_tx,
                 &mix_buf,
                 frame_size,
                 output_channels,
@@ -571,7 +572,7 @@ mod linux {
 
     fn send_audio_frame(
         _settings: &AudioSettings,
-        send: &SendCoordinator,
+        audio_tx: &broadcast::Sender<OMTFrame>,
         interleaved: &[f32],
         samples_per_channel: usize,
         channels: usize,
@@ -602,7 +603,7 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Timestamp is assigned in SendCoordinator at send-time (same as C# path).
+        frame.header.timestamp = crate::timebase::monotonic_100ns();
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
@@ -622,7 +623,8 @@ mod linux {
         bm.extend_from_slice(wire_scratch);
         frame.data = bm.freeze();
         frame.update_data_length();
-        send.enqueue_audio(frame);
+        // Send directly to broadcast — no intermediate thread hops.
+        let _ = audio_tx.send(frame);
     }
 
     fn pack_active_planar_channels(

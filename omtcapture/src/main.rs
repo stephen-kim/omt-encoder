@@ -22,6 +22,7 @@ struct RuntimePipelines {
     audio: AudioPipeline,
     video: VideoPipeline,
     send: SendCoordinator,
+    audio_tx: tokio::sync::broadcast::Sender<libomtnet::OMTFrame>,
     settings: Settings,
 }
 
@@ -50,7 +51,7 @@ async fn main() -> Result<()> {
 
     let initial_settings = shared_settings.read().await.clone();
     let send = SendCoordinator::new(tx.clone(), initial_settings.send.clone());
-    let mut audio = AudioPipeline::new(initial_settings.audio.clone(), send.clone());
+    let mut audio = AudioPipeline::new(initial_settings.audio.clone(), tx.audio.clone());
     audio.start();
     let mut video = VideoPipeline::new(
         initial_settings.video.clone(),
@@ -64,10 +65,12 @@ async fn main() -> Result<()> {
         &initial_settings.video.name,
         6400,
     )));
+    let audio_tx_clone = tx.audio.clone();
     let pipelines = Arc::new(Mutex::new(RuntimePipelines {
         audio,
         video,
         send,
+        audio_tx: audio_tx_clone,
         settings: initial_settings,
     }));
 
@@ -111,7 +114,7 @@ async fn main() -> Result<()> {
                 guard.video.stop();
                 guard.send =
                     SendCoordinator::new(tx_for_updates.clone(), new_settings.send.clone());
-                guard.audio = AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
+                guard.audio = AudioPipeline::new(new_settings.audio.clone(), guard.audio_tx.clone());
                 guard.audio.start();
                 // Recreate video pipeline only when send settings force us to recreate the
                 // coordinator. For regular video/preview updates we use in-place restart flags
@@ -127,7 +130,7 @@ async fn main() -> Result<()> {
                 if audio_changed {
                     guard.audio.stop();
                     guard.audio =
-                        AudioPipeline::new(new_settings.audio.clone(), guard.send.clone());
+                        AudioPipeline::new(new_settings.audio.clone(), guard.audio_tx.clone());
                     guard.audio.start();
                 }
                 if video_changed {
