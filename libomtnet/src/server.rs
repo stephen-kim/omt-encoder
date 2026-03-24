@@ -432,7 +432,7 @@ async fn handle_connection(
                             audio_frames_this_sec += 1;
                             unflushed_audio += 1;
                             sink.feed(frame).await?;
-                            if unflushed_audio >= 4 {
+                            if unflushed_audio >= 2 {
                                 sink.flush().await?;
                                 unflushed_audio = 0;
                             }
