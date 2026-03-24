@@ -113,6 +113,16 @@ echo "Building omtcapture (release)..."
 cd "$ROOT_DIR"
 cargo build --release -p omtcapture
 
+# ── Kernel tuning (TCP send buffers for glitch-free audio streaming) ───────
+SYSCTL_CONF="/etc/sysctl.d/99-omt.conf"
+echo "Applying kernel TCP tuning ($SYSCTL_CONF)..."
+cat <<SYSCTL | sudo tee "$SYSCTL_CONF" >/dev/null
+net.core.wmem_max = 4194304
+net.core.wmem_default = 4194304
+net.ipv4.tcp_wmem = 4096 262144 4194304
+SYSCTL
+sudo sysctl -p "$SYSCTL_CONF" >/dev/null 2>&1 || true
+
 # ── Install ──────────────────────────────────────────────────────────────────
 echo "Installing to $INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR"
