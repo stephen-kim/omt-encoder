@@ -122,11 +122,10 @@ impl OMTServer {
 }
 
 fn configure_sender_socket(socket: &TcpStream) {
-    // Match C# sender behavior:
-    // - TCP_NODELAY on (avoid Nagle latency spikes; audio frames are small/frequent)
-    // - Reasonable socket buffers
-    // - Best-effort keepalive (ignored on platforms where it fails)
-    let _ = socket.set_nodelay(true);
+    // Nagle algorithm enabled (TCP_NODELAY off) to reduce small packet count.
+    // Audio frames (~3.9KB) span multiple MSS segments, so Nagle adds < 1ms delay.
+    // Disabling NODELAY was causing excessive retransmits on Raspberry Pi.
+    let _ = socket.set_nodelay(false);
 
     #[cfg(unix)]
     {
@@ -190,9 +189,7 @@ async fn handle_connection(
     suggested_quality_hint: Arc<AtomicU8>,
     conn_id: u64,
 ) -> Result<(), io::Error> {
-    // Match C# sender behavior: low kernel-side buffering + no Nagle to avoid multi-second latency.
-    // If the receiver can't keep up we prefer dropping (latest-wins) over building delay.
-    let _ = socket.set_nodelay(true);
+    let _ = socket.set_nodelay(false);
     {
         use socket2::SockRef;
         let sock = SockRef::from(&socket);

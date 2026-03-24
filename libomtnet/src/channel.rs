@@ -13,7 +13,7 @@ pub struct OMTChannel {
 
 impl OMTChannel {
     pub fn new(stream: TcpStream) -> Self {
-        let _ = stream.set_nodelay(true);
+        let _ = stream.set_nodelay(false);
         let _ = apply_socket_options(&stream);
         OMTChannel {
             stream: Framed::new(stream, OMTFrameCodec),
