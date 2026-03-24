@@ -328,6 +328,7 @@ async fn handle_connection(
         let mut wants_video = *rx_wants_video.borrow();
         let mut slow_write_count: u64 = 0;
         let mut audio_frames_this_sec: u64 = 0;
+        let mut unflushed_audio: u32 = 0;
         let mut last_write_diag = tokio::time::Instant::now();
         let mut last_fps_log = tokio::time::Instant::now();
         loop {
@@ -414,6 +415,9 @@ async fn handle_connection(
                     }
                 }
             } else {
+                // Audio-only path: batch frames to reduce TCP packet count.
+                // feed() encodes into internal buffer without flushing;
+                // flush after every 4 audio frames (~40ms) or on non-audio frames.
                 tokio::select! {
                     changed = rx_wants_video.changed() => {
                         if changed.is_err() {
@@ -424,18 +428,21 @@ async fn handle_connection(
                     maybe = rx_other.recv() => {
                         let Some(frame) = maybe else { break; };
                         let ft = frame.header.frame_type;
-                        let t = tokio::time::Instant::now();
-                        sink.send(frame).await?;
-                        let e = t.elapsed();
                         if ft == OMTFrameType::Audio {
                             audio_frames_this_sec += 1;
-                        }
-                        if e.as_millis() > 10 {
-                            slow_write_count += 1;
-                            eprintln!(
-                                "CONN {} WRITER: {:?} sink.send took {}ms",
-                                write_conn_id, ft, e.as_millis()
-                            );
+                            unflushed_audio += 1;
+                            sink.feed(frame).await?;
+                            if unflushed_audio >= 4 {
+                                sink.flush().await?;
+                                unflushed_audio = 0;
+                            }
+                        } else {
+                            // Non-audio: flush any pending audio first, then send
+                            if unflushed_audio > 0 {
+                                sink.flush().await?;
+                                unflushed_audio = 0;
+                            }
+                            sink.send(frame).await?;
                         }
                     }
                 }
