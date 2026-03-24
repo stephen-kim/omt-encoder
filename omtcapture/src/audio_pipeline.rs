@@ -232,6 +232,7 @@ mod linux {
         let mut last_diag_log = Instant::now();
         let mut consecutive_silence: u32 = 0;
         let mut silence_events: u64 = 0;
+        let mut audio_timestamp: i64 = 0;
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Diagnostics: log timing anomalies (stderr to avoid stdout lock contention).
@@ -281,6 +282,7 @@ mod linux {
                     &mut planar_scratch,
                     &mut packed_scratch,
                     &mut wire_scratch,
+                    &mut audio_timestamp,
                 );
 
                 if restart_last_attempt.elapsed()
@@ -418,6 +420,7 @@ mod linux {
                     &mut planar_scratch,
                     &mut packed_scratch,
                     &mut wire_scratch,
+                    &mut audio_timestamp,
                 );
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -580,6 +583,7 @@ mod linux {
         planar_scratch: &mut Vec<f32>,
         packed_scratch: &mut Vec<f32>,
         wire_scratch: &mut Vec<u8>,
+        audio_timestamp: &mut i64,
     ) {
         if planar_scratch.len() != interleaved.len() {
             planar_scratch.resize(interleaved.len(), 0.0);
@@ -603,7 +607,11 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        frame.header.timestamp = crate::timebase::monotonic_100ns();
+        // Use fixed-interval timestamps like C# OMTClock: perfectly evenly-spaced
+        // to avoid OBS audio mixer inserting silence due to timestamp jitter.
+        frame.header.timestamp = *audio_timestamp;
+        let frame_interval = 10_000_000i64 * samples_per_channel as i64 / sample_rate as i64;
+        *audio_timestamp += frame_interval;
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
