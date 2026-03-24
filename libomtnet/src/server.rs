@@ -256,7 +256,12 @@ async fn handle_connection(
     let prod_state = Arc::clone(&state);
     let connection_closed = Arc::new(AtomicBool::new(false));
     let producer_closed = Arc::clone(&connection_closed);
+    let prod_conn_id = conn_id;
     let producer = tokio::spawn(async move {
+        let mut lagged_count: u64 = 0;
+        let mut audio_drop_count: u64 = 0;
+        let mut last_diag = tokio::time::Instant::now();
+
         while !producer_closed.load(Ordering::Relaxed) {
             let frame = tokio::select! {
                 // Always receive from all broadcast channels. Subscription state can change at any
@@ -268,8 +273,12 @@ async fn handle_connection(
             };
             let frame = match frame {
                 Ok(frame) => frame,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_skipped)) => {
-                    // Prefer dropping over latency; receiver is slow.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    lagged_count += skipped;
+                    eprintln!(
+                        "CONN {} DIAG: broadcast lagged, skipped {} frames",
+                        prod_conn_id, skipped
+                    );
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -295,18 +304,49 @@ async fn handle_connection(
                     let _ = tx_video_latest.send_replace(Some(frame));
                 }
                 OMTFrameType::Audio | OMTFrameType::Metadata => {
-                    let _ = tx_other.try_send(frame);
+                    if tx_other.try_send(frame).is_err() {
+                        audio_drop_count += 1;
+                        eprintln!(
+                            "CONN {} DIAG: tx_other full, dropped audio frame (total {})",
+                            prod_conn_id, audio_drop_count
+                        );
+                    }
                 }
                 _ => {}
+            }
+
+            if last_diag.elapsed().as_secs() >= 10 {
+                if lagged_count > 0 || audio_drop_count > 0 {
+                    eprintln!(
+                        "CONN {} DIAG 10s: lagged={}, audio_dropped={}",
+                        prod_conn_id, lagged_count, audio_drop_count
+                    );
+                }
+                lagged_count = 0;
+                audio_drop_count = 0;
+                last_diag = tokio::time::Instant::now();
             }
         }
     });
 
     // Writer: per-connection channels -> TCP.
     let write_state = Arc::clone(&state);
+    let write_conn_id = conn_id;
     let mut send_task = tokio::spawn(async move {
         let mut wants_video = *rx_wants_video.borrow();
+        let mut slow_write_count: u64 = 0;
+        let mut last_write_diag = tokio::time::Instant::now();
         loop {
+            if last_write_diag.elapsed().as_secs() >= 10 {
+                if slow_write_count > 0 {
+                    eprintln!(
+                        "CONN {} WRITER DIAG 10s: slow_writes={}",
+                        write_conn_id, slow_write_count
+                    );
+                    slow_write_count = 0;
+                }
+                last_write_diag = tokio::time::Instant::now();
+            }
             if wants_video {
                 // Biased select: prioritize video over audio/metadata to minimize video latency.
                 // When both are ready, always send the latest video frame first.
@@ -334,11 +374,30 @@ async fn handle_connection(
                                 frame
                             }
                         };
+                        let t = tokio::time::Instant::now();
                         sink.send(frame).await?;
+                        let e = t.elapsed();
+                        if e.as_millis() > 10 {
+                            slow_write_count += 1;
+                            eprintln!(
+                                "CONN {} WRITER: video sink.send took {}ms",
+                                write_conn_id, e.as_millis()
+                            );
+                        }
                     }
                     maybe = rx_other.recv() => {
                         let Some(frame) = maybe else { break; };
+                        let ft = frame.header.frame_type;
+                        let t = tokio::time::Instant::now();
                         sink.send(frame).await?;
+                        let e = t.elapsed();
+                        if e.as_millis() > 10 {
+                            slow_write_count += 1;
+                            eprintln!(
+                                "CONN {} WRITER: {:?} sink.send took {}ms",
+                                write_conn_id, ft, e.as_millis()
+                            );
+                        }
                     }
                     changed = rx_wants_video.changed() => {
                         if changed.is_err() {
@@ -357,7 +416,17 @@ async fn handle_connection(
                     }
                     maybe = rx_other.recv() => {
                         let Some(frame) = maybe else { break; };
+                        let ft = frame.header.frame_type;
+                        let t = tokio::time::Instant::now();
                         sink.send(frame).await?;
+                        let e = t.elapsed();
+                        if e.as_millis() > 10 {
+                            slow_write_count += 1;
+                            eprintln!(
+                                "CONN {} WRITER: {:?} sink.send took {}ms",
+                                write_conn_id, ft, e.as_millis()
+                            );
+                        }
                     }
                 }
             }
