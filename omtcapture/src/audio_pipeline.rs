@@ -223,7 +223,39 @@ mod linux {
             None
         };
 
+        let mut loop_start = Instant::now();
+        let mut frame_counter: u64 = 0;
+        let mut xrun_count: u64 = 0;
+        let mut slow_read_count: u64 = 0;
+        let mut slow_send_count: u64 = 0;
+        let mut last_diag_log = Instant::now();
+
         while running.load(std::sync::atomic::Ordering::SeqCst) {
+            // Diagnostics: log timing anomalies (stderr to avoid stdout lock contention).
+            let iter_elapsed = loop_start.elapsed();
+            if iter_elapsed.as_millis() > 20 && frame_counter > 10 {
+                eprintln!(
+                    "AUDIO DIAG: loop iteration took {}ms (frame {})",
+                    iter_elapsed.as_millis(),
+                    frame_counter
+                );
+            }
+            loop_start = Instant::now();
+            frame_counter += 1;
+
+            if last_diag_log.elapsed().as_secs() >= 10 {
+                if xrun_count > 0 || slow_read_count > 0 || slow_send_count > 0 {
+                    eprintln!(
+                        "AUDIO DIAG 10s: xruns={}, slow_reads={}, slow_sends={}",
+                        xrun_count, slow_read_count, slow_send_count
+                    );
+                }
+                xrun_count = 0;
+                slow_read_count = 0;
+                slow_send_count = 0;
+                last_diag_log = Instant::now();
+            }
+
             // If no inputs are currently active, send silence and retry device start periodically.
             if pcm_hdmi.is_none() && pcm_trs.is_none() {
                 mix_buf.fill(0.0);
@@ -282,6 +314,7 @@ mod linux {
                 continue;
             }
             // Read from ALSA sources. Returns: GotData / NoDataYet (EAGAIN) / Error
+            let read_start = Instant::now();
             let hdmi_result = if let Some(pcm) = &pcm_hdmi {
                 read_pcm(pcm, &mut hdmi_buf, frame_size, hdmi_channels.max(1), &mut hdmi_s16)
             } else {
@@ -292,6 +325,15 @@ mod linux {
             } else {
                 Ok(0)
             };
+            let read_elapsed = read_start.elapsed();
+            if read_elapsed.as_millis() > 20 {
+                slow_read_count += 1;
+                eprintln!(
+                    "AUDIO DIAG: read_pcm took {}ms (frame {})",
+                    read_elapsed.as_millis(),
+                    frame_counter
+                );
+            }
 
             let hdmi_ok = hdmi_result.as_ref().map(|n| *n > 0).unwrap_or(false);
             let trs_ok = trs_result.as_ref().map(|n| *n > 0).unwrap_or(false);
@@ -431,9 +473,7 @@ mod linux {
                 let _ = tx.try_send(mon);
             }
 
-            // No logging in the audio hot loop — any println! can cause
-            // stdout lock stalls that produce audible glitches.
-
+            let send_start = Instant::now();
             send_audio_frame(
                 &settings,
                 &send,
@@ -445,6 +485,15 @@ mod linux {
                 &mut packed_scratch,
                 &mut wire_scratch,
             );
+            let send_elapsed = send_start.elapsed();
+            if send_elapsed.as_millis() > 5 {
+                slow_send_count += 1;
+                eprintln!(
+                    "AUDIO DIAG: send_audio_frame took {}ms (frame {})",
+                    send_elapsed.as_millis(),
+                    frame_counter
+                );
+            }
         }
     }
 
@@ -999,6 +1048,7 @@ mod linux {
         // Ensure the PCM is running before waiting for data.
         match input.pcm.state() {
             State::XRun | State::Suspended => {
+                eprintln!("AUDIO DIAG: ALSA XRUN detected, recovering");
                 let _ = input.pcm.prepare();
                 let _ = input.pcm.start();
             }
