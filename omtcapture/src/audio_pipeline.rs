@@ -608,11 +608,8 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Use fixed-interval timestamps like C# OMTClock: perfectly evenly-spaced
-        // to avoid OBS audio mixer inserting silence due to timestamp jitter.
-        frame.header.timestamp = *audio_timestamp;
-        let frame_interval = 10_000_000i64 * samples_per_channel as i64 / sample_rate as i64;
-        *audio_timestamp += frame_interval;
+        // Timestamp=0: OBS uses its own system clock for audio timing.
+        frame.header.timestamp = 0;
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
