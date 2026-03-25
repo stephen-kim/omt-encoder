@@ -570,7 +570,8 @@ async function buildFramebufferOptions(framebuffers) {
       if (nameRes.ok) {
         const data = await nameRes.json();
         if (data && data.name) {
-          label = `${fb} (${data.name})`;
+          const res = (data.width && data.height) ? ` ${data.width}x${data.height}` : '';
+          label = `${fb} — ${data.name}${res}`;
         }
         if (data && data.width && data.height) {
           label = `${label} ${data.width}x${data.height}`;
