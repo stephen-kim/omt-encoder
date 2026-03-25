@@ -667,7 +667,11 @@ async function loadDevices() {
 
   const inputs = parseAlsaDevices(data.audioInputs);
   const outputs = parseAlsaDevices(data.audioOutputs);
-  const videoOptions = data.videoDevices.map(v => ({ value: v, label: v }));
+  const videoOptions = data.videoDevices.map(v => {
+    // "path (name)" format — use path as value, full string as label
+    const match = v.match(/^(\/dev\/\S+)\s+\((.+)\)$/);
+    return match ? { value: match[1], label: v } : { value: v, label: v };
+  });
   const fbOptions = await buildFramebufferOptions(data.framebuffers);
 
   const config = await (await fetch('/api/config')).json();

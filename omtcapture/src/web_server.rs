@@ -331,6 +331,69 @@ fn run_command(cmd: &str, args: &[&str]) -> String {
 }
 
 fn list_devices(dir: &str, prefix: &str) -> Vec<String> {
+    if prefix == "video" {
+        // Filter to real V4L2 capture devices with friendly names
+        return list_video_capture_devices();
+    }
+    let mut devices = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(prefix) {
+                devices.push(format!("{}/{}", dir, name));
+            }
+        }
+    }
+    devices.sort();
+    devices
+}
+
+fn list_video_capture_devices() -> Vec<String> {
+    // Parse v4l2-ctl --list-devices to get device names, then check each
+    // /dev/videoN for actual Video Capture capability.
+    let output = match Command::new("v4l2-ctl").args(["--list-devices"]).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => return list_all_dev_entries("/dev", "video"),
+    };
+
+    // Parse: device name lines are unindented, /dev paths are tab-indented
+    let mut current_name = String::new();
+    let mut candidates: Vec<(String, String)> = Vec::new(); // (path, name)
+    for line in output.lines() {
+        if !line.starts_with('\t') && !line.is_empty() {
+            current_name = line.trim_end_matches(':').to_string();
+        } else {
+            let trimmed = line.trim();
+            if trimmed.starts_with("/dev/video") {
+                candidates.push((trimmed.to_string(), current_name.clone()));
+            }
+        }
+    }
+
+    // Check each candidate for Video Capture capability (not Multiplanar/metadata)
+    let mut devices = Vec::new();
+    for (path, name) in candidates {
+        if let Ok(caps) = Command::new("v4l2-ctl")
+            .args(["--device", &path, "--info"])
+            .output()
+        {
+            let info = String::from_utf8_lossy(&caps.stdout);
+            // Must have "Video Capture" but filter out multiplanar (ISP nodes)
+            if info.contains("Video Capture")
+                && !info.contains("Video Capture Multiplanar")
+            {
+                devices.push(format!("{} ({})", path, name));
+            }
+        }
+    }
+
+    if devices.is_empty() {
+        return list_all_dev_entries("/dev", "video");
+    }
+    devices
+}
+
+fn list_all_dev_entries(dir: &str, prefix: &str) -> Vec<String> {
     let mut devices = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
