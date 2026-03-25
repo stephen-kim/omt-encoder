@@ -383,6 +383,7 @@ fn list_video_capture_devices() -> Vec<String> {
             if let Some(devcaps_start) = info.find("Device Caps") {
                 let devcaps = &info[devcaps_start..];
                 if devcaps.contains("Video Capture")
+                    && !devcaps.contains("Multiplanar")
                     && !devcaps.contains("Metadata Capture")
                 {
                     devices.push(format!("{} ({})", path, name));
