@@ -481,7 +481,6 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     <div>
       <div class="kicker" data-i18n="kicker">OMT Capture</div>
       <h1 data-i18n="title">Control Deck</h1>
-      <p class="sub" data-i18n="sub">Low-latency ingest, transport, and monitoring controls.</p>
     </div>
     <div>
       <select id="langSelect" onchange="setLang(this.value)" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:#0c1219;color:var(--text);font-size:12px;cursor:pointer;margin-bottom:6px;">
@@ -491,7 +490,6 @@ small { color: var(--muted); display: block; margin-top: 8px; }
         <option value="es">Español</option>
       </select>
       <div id="status" class="status-pill hidden"></div>
-      <div id="displayMode" class="meta"></div>
       <div class="hero-actions">
         <button id="saveButtonTop" onclick="saveConfig()" data-i18n="save">Save changes</button>
         <button class="ghost" onclick="loadDevices()" data-i18n="refresh">Refresh devices</button>
@@ -878,8 +876,6 @@ function detectVideoPreset(width, height) {
 async function loadDevices() {
   const res = await fetch('/api/devices');
   const data = await res.json();
-  const mode = data.displayMode === 'desktop' ? 'Desktop UI running' : 'Console mode';
-  document.getElementById('displayMode').innerText = `Display mode: ${mode}`;
   document.getElementById('audioInputs').innerText = data.audioInputs;
   document.getElementById('audioOutputs').innerText = data.audioOutputs;
   document.getElementById('videoDevices').innerText = data.videoDevices.join('\n');
