@@ -370,7 +370,8 @@ fn list_video_capture_devices() -> Vec<String> {
         }
     }
 
-    // Check each candidate for Video Capture capability (not Multiplanar/metadata)
+    // Check each candidate's Device Caps (not overall Capabilities) for Video Capture.
+    // video1 on Cam Link is Metadata Capture only — must be filtered out.
     let mut devices = Vec::new();
     for (path, name) in candidates {
         if let Ok(caps) = Command::new("v4l2-ctl")
@@ -378,11 +379,14 @@ fn list_video_capture_devices() -> Vec<String> {
             .output()
         {
             let info = String::from_utf8_lossy(&caps.stdout);
-            // Must have "Video Capture" but filter out multiplanar (ISP nodes)
-            if info.contains("Video Capture")
-                && !info.contains("Video Capture Multiplanar")
-            {
-                devices.push(format!("{} ({})", path, name));
+            // Extract only the Device Caps section (after "Device Caps")
+            if let Some(devcaps_start) = info.find("Device Caps") {
+                let devcaps = &info[devcaps_start..];
+                if devcaps.contains("Video Capture")
+                    && !devcaps.contains("Metadata Capture")
+                {
+                    devices.push(format!("{} ({})", path, name));
+                }
             }
         }
     }
