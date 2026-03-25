@@ -4,6 +4,214 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OMT Capture Control</title>
+<script>
+const I18N = {
+  en: {
+    title: "Control Deck", kicker: "OMT Capture",
+    sub: "Low-latency ingest, transport, and monitoring controls.",
+    save: "Save changes", refresh: "Refresh devices",
+    videoInput: "Video Input", videoDevice: "Video device",
+    videoDeviceHelp: "V4L2 device that provides HDMI capture.",
+    sourceName: "Source name", sourceNameHelp: "Shown in the receiver list. Keep it short and unique.",
+    useNative: "Use native input format (no transform)",
+    useNativeHelp: "Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.",
+    nativeLock: "Native input mode is enabled. Disable it to edit transforms.",
+    resPreset: "Resolution preset", custom: "Custom",
+    presetHelp: "Choose a preset or dial in a custom format.",
+    width: "Width", height: "Height",
+    resHelp: "Output resolution when not using native mode.",
+    fpsN: "Frame rate numerator", fpsD: "Frame rate denominator",
+    fpsHelp: "Example: 30000 / 1001 for 29.97 fps.",
+    codec: "Codec", codecHelp: "Pixel format sent over OMT when not native.",
+    audioInput: "Audio Input", captureSources: "Capture sources",
+    captureHelp: "Select up to two inputs to mix. Leave empty for silent.",
+    sampleRate: "Sample rate (Hz)", channels: "Channels",
+    sampleRateHelp: "Keep in sync with the HDMI source when possible.",
+    samplesPerCh: "Samples per channel",
+    samplesPerChHelp: "Audio packet size. Lower = lower latency, higher = more stability.",
+    mixGain: "Mix gain:", gainHelp: "Applied after mixing HDMI/TRS inputs.",
+    alsaTuning: "ALSA tuning",
+    bufferUsec: "arecord buffer (usec)", periodUsec: "arecord period (usec)",
+    alsaHelp: "Larger buffers reduce underruns but add delay.",
+    restartReads: "Restart after failed reads", restartCooldown: "Restart cooldown (ms)",
+    restartHelp: "Auto-restarts the audio pipeline when the device stalls.",
+    monitorOutput: "Monitor output", monitorEnabled: "Monitor enabled",
+    monitorDevice: "Monitor device", monitorGain: "Monitor gain",
+    monitorHelp: "Applies only to the local monitor output.",
+    transport: "Transport",
+    audioQueue: "Audio queue capacity", audioQueueHelp: "Buffered audio packets before dropping oldest. Helps smooth jitter.",
+    videoQueue: "Video queue capacity", videoQueueHelp: "How many frames can wait before dropping. Keep small for low latency.",
+    forceZero: "Force zero timestamps", forceZeroHelp: "Reduces receiver buffering. Can break strict A/V sync in some players.",
+    preview: "Preview / HDMI Passthrough", previewEnabled: "Preview enabled",
+    previewHelp: "Output captured video to framebuffer devices (SPI LCD, HDMI out).",
+    outputs: "Outputs", outputsHelp: "Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).",
+    webService: "Web Service", webPort: "Web port",
+    webPortHelp: "Requires service restart to apply.",
+    webSmall: "Video changes apply without reboot. Web port changes require restart.",
+    devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
+    videoDevices: "Video devices", framebuffers: "Framebuffers",
+    saved: "Saved",
+  },
+  ko: {
+    title: "Control Deck", kicker: "OMT Capture",
+    sub: "저지연 수집, 전송 및 모니터링 제어.",
+    save: "변경사항 저장", refresh: "장치 새로고침",
+    videoInput: "비디오 입력", videoDevice: "비디오 장치",
+    videoDeviceHelp: "HDMI 캡처를 제공하는 V4L2 장치.",
+    sourceName: "소스 이름", sourceNameHelp: "수신기 목록에 표시됩니다. 짧고 고유하게 지정하세요.",
+    useNative: "네이티브 입력 형식 사용 (변환 없음)",
+    useNativeHelp: "최저 지연을 위해 스케일링과 픽셀 변환을 건너뜁니다. 일부 수신기(OBS OMT 포함)는 VMX1을 기대하며 네이티브 형식에서 검은 화면이 나올 수 있습니다.",
+    nativeLock: "네이티브 입력 모드가 활성화되어 있습니다. 변환을 편집하려면 비활성화하세요.",
+    resPreset: "해상도 프리셋", custom: "사용자 지정",
+    presetHelp: "프리셋을 선택하거나 사용자 지정 형식을 설정하세요.",
+    width: "너비", height: "높이",
+    resHelp: "네이티브 모드를 사용하지 않을 때의 출력 해상도.",
+    fpsN: "프레임 레이트 분자", fpsD: "프레임 레이트 분모",
+    fpsHelp: "예: 29.97 fps의 경우 30000 / 1001.",
+    codec: "코덱", codecHelp: "네이티브가 아닐 때 OMT로 전송되는 픽셀 형식.",
+    audioInput: "오디오 입력", captureSources: "캡처 소스",
+    captureHelp: "믹싱할 입력을 최대 두 개까지 선택하세요. 비워두면 무음.",
+    sampleRate: "샘플 레이트 (Hz)", channels: "채널",
+    sampleRateHelp: "가능한 HDMI 소스와 동기화하세요.",
+    samplesPerCh: "채널당 샘플 수",
+    samplesPerChHelp: "오디오 패킷 크기. 낮을수록 저지연, 높을수록 안정적.",
+    mixGain: "믹스 게인:", gainHelp: "HDMI/TRS 입력 믹싱 후 적용됩니다.",
+    alsaTuning: "ALSA 튜닝",
+    bufferUsec: "arecord 버퍼 (usec)", periodUsec: "arecord 주기 (usec)",
+    alsaHelp: "버퍼가 클수록 언더런이 줄지만 딜레이가 증가합니다.",
+    restartReads: "읽기 실패 후 재시작", restartCooldown: "재시작 쿨다운 (ms)",
+    restartHelp: "장치가 멈추면 오디오 파이프라인을 자동 재시작합니다.",
+    monitorOutput: "모니터 출력", monitorEnabled: "모니터 활성화",
+    monitorDevice: "모니터 장치", monitorGain: "모니터 게인",
+    monitorHelp: "로컬 모니터 출력에만 적용됩니다.",
+    transport: "전송",
+    audioQueue: "오디오 큐 용량", audioQueueHelp: "가장 오래된 패킷을 삭제하기 전 버퍼링할 오디오 패킷 수. 지터 완화에 도움됩니다.",
+    videoQueue: "비디오 큐 용량", videoQueueHelp: "삭제 전 대기할 수 있는 프레임 수. 저지연을 위해 작게 유지하세요.",
+    forceZero: "타임스탬프 강제 0", forceZeroHelp: "수신기 버퍼링을 줄입니다. 일부 플레이어에서 A/V 동기화가 깨질 수 있습니다.",
+    preview: "프리뷰 / HDMI 패스스루", previewEnabled: "프리뷰 활성화",
+    previewHelp: "캡처된 비디오를 프레임버퍼 장치(SPI LCD, HDMI 출력)로 출력합니다.",
+    outputs: "출력", outputsHelp: "각 출력을 활성화하고 FPS를 설정하세요. 0이면 전체 프레임 레이트(HDMI 패스스루).",
+    webService: "웹 서비스", webPort: "웹 포트",
+    webPortHelp: "적용하려면 서비스 재시작이 필요합니다.",
+    webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
+    devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
+    videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
+    saved: "저장됨",
+  },
+  ja: {
+    title: "Control Deck", kicker: "OMT Capture",
+    sub: "低遅延の取り込み、転送、モニタリング制御。",
+    save: "変更を保存", refresh: "デバイスを更新",
+    videoInput: "映像入力", videoDevice: "映像デバイス",
+    videoDeviceHelp: "HDMIキャプチャを提供するV4L2デバイス。",
+    sourceName: "ソース名", sourceNameHelp: "受信機リストに表示されます。短くユニークに。",
+    useNative: "ネイティブ入力形式を使用（変換なし）",
+    useNativeHelp: "最低遅延のためスケーリングとピクセル変換をスキップします。一部の受信機（OBS OMT含む）はVMX1を想定しており、ネイティブ形式では黒画面になる場合があります。",
+    nativeLock: "ネイティブ入力モードが有効です。変換を編集するには無効にしてください。",
+    resPreset: "解像度プリセット", custom: "カスタム",
+    presetHelp: "プリセットを選択するかカスタム形式を設定してください。",
+    width: "幅", height: "高さ",
+    resHelp: "ネイティブモード未使用時の出力解像度。",
+    fpsN: "フレームレート分子", fpsD: "フレームレート分母",
+    fpsHelp: "例: 29.97 fpsの場合 30000 / 1001。",
+    codec: "コーデック", codecHelp: "ネイティブでない場合にOMTで送信されるピクセル形式。",
+    audioInput: "音声入力", captureSources: "キャプチャソース",
+    captureHelp: "ミックスする入力を最大2つ選択してください。空にすると無音。",
+    sampleRate: "サンプルレート (Hz)", channels: "チャンネル",
+    sampleRateHelp: "可能な限りHDMIソースと同期してください。",
+    samplesPerCh: "チャンネルあたりサンプル数",
+    samplesPerChHelp: "音声パケットサイズ。低い=低遅延、高い=安定性向上。",
+    mixGain: "ミックスゲイン:", gainHelp: "HDMI/TRS入力のミキシング後に適用。",
+    alsaTuning: "ALSAチューニング",
+    bufferUsec: "arecordバッファ (usec)", periodUsec: "arecord周期 (usec)",
+    alsaHelp: "バッファが大きいほどアンダーランは減りますが遅延が増えます。",
+    restartReads: "読み取り失敗後に再起動", restartCooldown: "再起動クールダウン (ms)",
+    restartHelp: "デバイスが停止した場合、音声パイプラインを自動再起動します。",
+    monitorOutput: "モニター出力", monitorEnabled: "モニター有効",
+    monitorDevice: "モニターデバイス", monitorGain: "モニターゲイン",
+    monitorHelp: "ローカルモニター出力にのみ適用されます。",
+    transport: "トランスポート",
+    audioQueue: "音声キュー容量", audioQueueHelp: "最も古いパケットを破棄する前にバッファリングする音声パケット数。ジッター軽減に役立ちます。",
+    videoQueue: "映像キュー容量", videoQueueHelp: "破棄前に待機できるフレーム数。低遅延のため小さく保ってください。",
+    forceZero: "タイムスタンプを強制ゼロ", forceZeroHelp: "受信機のバッファリングを減らします。一部のプレーヤーでA/V同期が崩れる場合があります。",
+    preview: "プレビュー / HDMIパススルー", previewEnabled: "プレビュー有効",
+    previewHelp: "キャプチャした映像をフレームバッファデバイス（SPI LCD、HDMI出力）に出力します。",
+    outputs: "出力", outputsHelp: "各出力を有効にしてFPSを設定。0でフルフレームレート（HDMIパススルー）。",
+    webService: "Webサービス", webPort: "Webポート",
+    webPortHelp: "適用するにはサービスの再起動が必要です。",
+    webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
+    devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
+    videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
+    saved: "保存済み",
+  },
+  es: {
+    title: "Control Deck", kicker: "OMT Capture",
+    sub: "Controles de ingesta, transporte y monitoreo de baja latencia.",
+    save: "Guardar cambios", refresh: "Actualizar dispositivos",
+    videoInput: "Entrada de video", videoDevice: "Dispositivo de video",
+    videoDeviceHelp: "Dispositivo V4L2 que proporciona captura HDMI.",
+    sourceName: "Nombre de fuente", sourceNameHelp: "Se muestra en la lista de receptores. Mantenlo corto y unico.",
+    useNative: "Usar formato nativo (sin transformacion)",
+    useNativeHelp: "Omite el escalado y la conversion de pixeles para la menor latencia. Algunos receptores (incluido OBS OMT) esperan VMX1 y pueden mostrar una pantalla negra con formatos nativos.",
+    nativeLock: "El modo de entrada nativo esta habilitado. Desactivalo para editar transformaciones.",
+    resPreset: "Preset de resolucion", custom: "Personalizado",
+    presetHelp: "Elige un preset o configura un formato personalizado.",
+    width: "Ancho", height: "Alto",
+    resHelp: "Resolucion de salida cuando no se usa el modo nativo.",
+    fpsN: "Numerador de tasa de frames", fpsD: "Denominador de tasa de frames",
+    fpsHelp: "Ejemplo: 30000 / 1001 para 29.97 fps.",
+    codec: "Codec", codecHelp: "Formato de pixel enviado por OMT cuando no es nativo.",
+    audioInput: "Entrada de audio", captureSources: "Fuentes de captura",
+    captureHelp: "Selecciona hasta dos entradas para mezclar. Deja vacio para silencio.",
+    sampleRate: "Tasa de muestreo (Hz)", channels: "Canales",
+    sampleRateHelp: "Manten sincronizado con la fuente HDMI cuando sea posible.",
+    samplesPerCh: "Muestras por canal",
+    samplesPerChHelp: "Tamano del paquete de audio. Menor = menor latencia, mayor = mas estabilidad.",
+    mixGain: "Ganancia de mezcla:", gainHelp: "Se aplica despues de mezclar las entradas HDMI/TRS.",
+    alsaTuning: "Ajuste ALSA",
+    bufferUsec: "Buffer arecord (usec)", periodUsec: "Periodo arecord (usec)",
+    alsaHelp: "Buffers mas grandes reducen subdesbordamientos pero agregan retardo.",
+    restartReads: "Reiniciar tras lecturas fallidas", restartCooldown: "Enfriamiento de reinicio (ms)",
+    restartHelp: "Reinicia automaticamente el pipeline de audio cuando el dispositivo se detiene.",
+    monitorOutput: "Salida de monitor", monitorEnabled: "Monitor habilitado",
+    monitorDevice: "Dispositivo de monitor", monitorGain: "Ganancia de monitor",
+    monitorHelp: "Se aplica solo a la salida de monitor local.",
+    transport: "Transporte",
+    audioQueue: "Capacidad de cola de audio", audioQueueHelp: "Paquetes de audio en buffer antes de descartar los mas antiguos. Ayuda a suavizar el jitter.",
+    videoQueue: "Capacidad de cola de video", videoQueueHelp: "Cuantos frames pueden esperar antes de descartarse. Manten bajo para baja latencia.",
+    forceZero: "Forzar timestamps a cero", forceZeroHelp: "Reduce el buffering del receptor. Puede romper la sincronizacion A/V en algunos reproductores.",
+    preview: "Vista previa / Passthrough HDMI", previewEnabled: "Vista previa habilitada",
+    previewHelp: "Envia el video capturado a dispositivos framebuffer (SPI LCD, salida HDMI).",
+    outputs: "Salidas", outputsHelp: "Habilita cada salida y configura su FPS. Usa 0 para framerate completo (passthrough HDMI).",
+    webService: "Servicio Web", webPort: "Puerto web",
+    webPortHelp: "Requiere reinicio del servicio para aplicarse.",
+    webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
+    devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
+    videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
+    saved: "Guardado",
+  },
+};
+function detectLang() {
+  const nav = (navigator.language || '').toLowerCase();
+  if (nav.startsWith('ko')) return 'ko';
+  if (nav.startsWith('ja')) return 'ja';
+  if (nav.startsWith('es')) return 'es';
+  return 'en';
+}
+const T = I18N[detectLang()] || I18N.en;
+function t(key) { return T[key] || I18N.en[key] || key; }
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    el.innerHTML = t(el.dataset.i18nHtml);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+}
+</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 :root {
@@ -266,197 +474,197 @@ small { color: var(--muted); display: block; margin-top: 8px; }
 <div class="page fade-in">
   <header class="hero">
     <div>
-      <div class="kicker">OMT Capture</div>
-      <h1>Control Deck</h1>
-      <p class="sub">Low-latency ingest, transport, and monitoring controls.</p>
+      <div class="kicker" data-i18n="kicker">OMT Capture</div>
+      <h1 data-i18n="title">Control Deck</h1>
+      <p class="sub" data-i18n="sub">Low-latency ingest, transport, and monitoring controls.</p>
     </div>
     <div>
       <div id="status" class="status-pill hidden"></div>
       <div id="displayMode" class="meta"></div>
       <div class="hero-actions">
-        <button id="saveButtonTop" onclick="saveConfig()">Save changes</button>
-        <button class="ghost" onclick="loadDevices()">Refresh devices</button>
+        <button id="saveButtonTop" onclick="saveConfig()" data-i18n="save">Save changes</button>
+        <button class="ghost" onclick="loadDevices()" data-i18n="refresh">Refresh devices</button>
       </div>
     </div>
   </header>
 
   <section class="grid two">
     <div class="card">
-      <div class="card-title">Video Input</div>
-      <label>Video device</label>
+      <div class="card-title" data-i18n="videoInput">Video Input</div>
+      <label data-i18n="videoDevice">Video device</label>
       <select id="videoDevicePath"></select>
-      <div class="help">V4L2 device that provides HDMI capture.</div>
+      <div class="help" data-i18n="videoDeviceHelp">V4L2 device that provides HDMI capture.</div>
 
-      <label>Source name</label>
+      <label data-i18n="sourceName">Source name</label>
       <input id="videoName" />
-      <div class="help">Shown in the receiver list. Keep it short and unique.</div>
+      <div class="help" data-i18n="sourceNameHelp">Shown in the receiver list. Keep it short and unique.</div>
 
       <div class="check-row">
         <input id="videoUseNative" type="checkbox" onchange="toggleNativeInputs()" />
-        <label for="videoUseNative">Use native input format (no transform)</label>
+        <label for="videoUseNative" data-i18n="useNative">Use native input format (no transform)</label>
       </div>
-      <div class="help">Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.</div>
+      <div class="help" data-i18n="useNativeHelp">Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.</div>
 
       <div id="videoTransformFields">
-        <div class="native-lock">Native input mode is enabled. Disable it to edit transforms.</div>
-        <label>Resolution preset</label>
+        <div class="native-lock" data-i18n="nativeLock">Native input mode is enabled. Disable it to edit transforms.</div>
+        <label data-i18n="resPreset">Resolution preset</label>
         <select id="videoPreset" onchange="applyVideoPreset()">
-          <option value="custom">Custom</option>
+          <option value="custom" data-i18n="custom">Custom</option>
           <option value="hd-native">HD (1920x1080, YUY2)</option>
           <option value="hd-nv12">HD (1920x1080, NV12)</option>
           <option value="uhd-yuy2">UHD (3840x2160, YUY2)</option>
           <option value="uhd-nv12">UHD (3840x2160, NV12)</option>
         </select>
-        <div class="help">Choose a preset or dial in a custom format.</div>
+        <div class="help" data-i18n="presetHelp">Choose a preset or dial in a custom format.</div>
 
         <div class="inline">
           <div>
-            <label>Width</label>
+            <label data-i18n="width">Width</label>
             <input id="videoWidth" type="number" />
           </div>
           <div>
-            <label>Height</label>
+            <label data-i18n="height">Height</label>
             <input id="videoHeight" type="number" />
           </div>
         </div>
-        <div class="help">Output resolution when not using native mode.</div>
+        <div class="help" data-i18n="resHelp">Output resolution when not using native mode.</div>
 
         <div class="inline">
           <div>
-            <label>Frame rate numerator</label>
+            <label data-i18n="fpsN">Frame rate numerator</label>
             <input id="videoFrameRateN" type="number" />
           </div>
           <div>
-            <label>Frame rate denominator</label>
+            <label data-i18n="fpsD">Frame rate denominator</label>
             <input id="videoFrameRateD" type="number" />
           </div>
         </div>
-        <div class="help">Example: 30000 / 1001 for 29.97 fps.</div>
+        <div class="help" data-i18n="fpsHelp">Example: 30000 / 1001 for 29.97 fps.</div>
 
-        <label>Codec</label>
+        <label data-i18n="codec">Codec</label>
         <select id="videoCodec">
           <option value="UYVY">UYVY</option>
           <option value="YUY2">YUY2</option>
           <option value="NV12">NV12</option>
         </select>
-        <div class="help">Pixel format sent over OMT when not native.</div>
+        <div class="help" data-i18n="codecHelp">Pixel format sent over OMT when not native.</div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">Audio Input</div>
-      <div class="section-label">Capture sources</div>
+      <div class="card-title" data-i18n="audioInput">Audio Input</div>
+      <div class="section-label" data-i18n="captureSources">Capture sources</div>
       <div id="audioInputDevices" class="check-grid"></div>
-      <div class="help">Select up to two inputs to mix. Leave empty for silent.</div>
+      <div class="help" data-i18n="captureHelp">Select up to two inputs to mix. Leave empty for silent.</div>
 
       <div class="inline">
         <div>
-          <label>Sample rate (Hz)</label>
+          <label data-i18n="sampleRate">Sample rate (Hz)</label>
           <input id="audioSampleRate" type="number" />
         </div>
         <div>
-          <label>Channels</label>
+          <label data-i18n="channels">Channels</label>
           <input id="audioChannels" type="number" />
         </div>
       </div>
-      <div class="help">Keep in sync with the HDMI source when possible.</div>
+      <div class="help" data-i18n="sampleRateHelp">Keep in sync with the HDMI source when possible.</div>
 
-      <label>Samples per channel</label>
+      <label data-i18n="samplesPerCh">Samples per channel</label>
       <input id="audioSamplesPerChannel" type="number" />
-      <div class="help">Audio packet size. Lower = lower latency, higher = more stability.</div>
+      <div class="help" data-i18n="samplesPerChHelp">Audio packet size. Lower = lower latency, higher = more stability.</div>
 
-      <label>Mix gain: <span id="gainDisplay"></span></label>
+      <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
       <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
-      <div class="help">Applied after mixing HDMI/TRS inputs.</div>
+      <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
 
-      <div class="section-label">ALSA tuning</div>
+      <div class="section-label" data-i18n="alsaTuning">ALSA tuning</div>
       <div class="inline">
         <div>
-          <label>arecord buffer (usec)</label>
+          <label data-i18n="bufferUsec">arecord buffer (usec)</label>
           <input id="audioArecordBufferUsec" type="number" />
         </div>
         <div>
-          <label>arecord period (usec)</label>
+          <label data-i18n="periodUsec">arecord period (usec)</label>
           <input id="audioArecordPeriodUsec" type="number" />
         </div>
       </div>
-      <div class="help">Larger buffers reduce underruns but add delay.</div>
+      <div class="help" data-i18n="alsaHelp">Larger buffers reduce underruns but add delay.</div>
 
       <div class="inline">
         <div>
-          <label>Restart after failed reads</label>
+          <label data-i18n="restartReads">Restart after failed reads</label>
           <input id="audioRestartAfterFailedReads" type="number" />
         </div>
         <div>
-          <label>Restart cooldown (ms)</label>
+          <label data-i18n="restartCooldown">Restart cooldown (ms)</label>
           <input id="audioRestartCooldownMs" type="number" />
         </div>
       </div>
-      <div class="help">Auto-restarts the audio pipeline when the device stalls.</div>
+      <div class="help" data-i18n="restartHelp">Auto-restarts the audio pipeline when the device stalls.</div>
 
-      <div class="section-label">Monitor output</div>
+      <div class="section-label" data-i18n="monitorOutput">Monitor output</div>
       <div class="check-row">
         <input id="monitorEnabled" type="checkbox" />
-        <label for="monitorEnabled">Monitor enabled</label>
+        <label for="monitorEnabled" data-i18n="monitorEnabled">Monitor enabled</label>
       </div>
-      <label>Monitor device</label>
+      <label data-i18n="monitorDevice">Monitor device</label>
       <select id="monitorDevice"></select>
-      <label>Monitor gain</label>
+      <label data-i18n="monitorGain">Monitor gain</label>
       <input id="monitorGain" type="number" step="0.01" />
-      <div class="help">Applies only to the local monitor output.</div>
+      <div class="help" data-i18n="monitorHelp">Applies only to the local monitor output.</div>
     </div>
   </section>
 
   <section class="grid two">
     <div class="card">
-      <div class="card-title">Transport</div>
-      <label>Audio queue capacity</label>
+      <div class="card-title" data-i18n="transport">Transport</div>
+      <label data-i18n="audioQueue">Audio queue capacity</label>
       <input id="sendAudioQueueCapacity" type="number" />
-      <div class="help">Buffered audio packets before dropping oldest. Helps smooth jitter.</div>
+      <div class="help" data-i18n="audioQueueHelp">Buffered audio packets before dropping oldest. Helps smooth jitter.</div>
 
-      <label>Video queue capacity</label>
+      <label data-i18n="videoQueue">Video queue capacity</label>
       <input id="sendVideoQueueCapacity" type="number" />
-      <div class="help">How many frames can wait before dropping. Keep small for low latency.</div>
+      <div class="help" data-i18n="videoQueueHelp">How many frames can wait before dropping. Keep small for low latency.</div>
 
       <div class="check-row">
         <input id="sendForceZeroTimestamps" type="checkbox" />
-        <label for="sendForceZeroTimestamps">Force zero timestamps</label>
+        <label for="sendForceZeroTimestamps" data-i18n="forceZero">Force zero timestamps</label>
       </div>
-      <div class="help">Reduces receiver buffering. Can break strict A/V sync in some players.</div>
+      <div class="help" data-i18n="forceZeroHelp">Reduces receiver buffering. Can break strict A/V sync in some players.</div>
     </div>
 
     <div class="card">
-      <div class="card-title">Preview / HDMI Passthrough</div>
+      <div class="card-title" data-i18n="preview">Preview / HDMI Passthrough</div>
       <div class="check-row">
         <input id="previewEnabled" type="checkbox" />
-        <label for="previewEnabled">Preview enabled</label>
+        <label for="previewEnabled" data-i18n="previewEnabled">Preview enabled</label>
       </div>
-      <div class="help">Output captured video to framebuffer devices (SPI LCD, HDMI out).</div>
+      <div class="help" data-i18n="previewHelp">Output captured video to framebuffer devices (SPI LCD, HDMI out).</div>
 
-      <label>Outputs</label>
+      <label data-i18n="outputs">Outputs</label>
       <div id="previewOutputs"></div>
-      <div class="help">Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).</div>
+      <div class="help" data-i18n="outputsHelp">Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).</div>
     </div>
   </section>
 
   <section class="grid two">
     <div class="card">
-      <div class="card-title">Web Service</div>
-      <label>Web port</label>
+      <div class="card-title" data-i18n="webService">Web Service</div>
+      <label data-i18n="webPort">Web port</label>
       <input id="webPort" type="number" />
-      <div class="help">Requires service restart to apply.</div>
-      <small>Video changes apply without reboot. Web port changes require restart.</small>
+      <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
+      <small data-i18n="webSmall">Video changes apply without reboot. Web port changes require restart.</small>
     </div>
 
     <div class="card">
-      <div class="card-title">Devices</div>
-      <div class="section-label">Audio inputs</div>
+      <div class="card-title" data-i18n="devices">Devices</div>
+      <div class="section-label" data-i18n="audioInputs">Audio inputs</div>
       <pre id="audioInputs"></pre>
-      <div class="section-label">Audio outputs</div>
+      <div class="section-label" data-i18n="audioOutputs">Audio outputs</div>
       <pre id="audioOutputs"></pre>
-      <div class="section-label">Video devices</div>
+      <div class="section-label" data-i18n="videoDevices">Video devices</div>
       <pre id="videoDevices"></pre>
-      <div class="section-label">Framebuffers</div>
+      <div class="section-label" data-i18n="framebuffers">Framebuffers</div>
       <pre id="framebuffers"></pre>
     </div>
   </section>
@@ -881,9 +1089,10 @@ async function saveConfig() {
 
   const res = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await res.json();
-  document.getElementById('status').innerText = result.message || 'Saved';
+  document.getElementById('status').innerText = result.message || t('saved');
 }
 
+applyI18n();
 loadConfig().then(loadDevices);
 </script>
 </body>
