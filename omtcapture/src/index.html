@@ -50,7 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
-    saved: "Saved",
+    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed",
   },
   ko: {
     title: "컨트롤 데크", kicker: "OMT Capture",
@@ -96,7 +96,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
-    saved: "저장됨",
+    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패",
   },
   ja: {
     title: "コントロールデッキ", kicker: "OMT Capture",
@@ -142,7 +142,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
-    saved: "保存済み",
+    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗",
   },
   es: {
     title: "Panel de Control", kicker: "OMT Capture",
@@ -188,7 +188,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
-    saved: "Guardado",
+    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar",
   },
 };
 function detectLang() {
@@ -473,6 +473,20 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.toast {
+  position: fixed; bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  padding: 12px 20px; border-radius: 12px; font-weight: 600; font-size: 13px;
+  color: var(--text); background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 16px 40px rgba(4, 8, 16, 0.6);
+  pointer-events: none; opacity: 0;
+  transition: transform 280ms ease, opacity 280ms ease;
+  z-index: 100; max-width: 90vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { border-color: rgba(110, 247, 199, 0.5); background: linear-gradient(135deg, rgba(110, 247, 199, 0.15), var(--card)); }
+.toast.error   { border-color: rgba(255, 107, 107, 0.5); background: linear-gradient(135deg, rgba(255, 107, 107, 0.15), var(--card)); }
+.toast.info    { border-color: rgba(86, 212, 255, 0.5);  background: linear-gradient(135deg, rgba(86, 212, 255, 0.15), var(--card)); }
 </style>
 </head>
 <body>
@@ -489,10 +503,9 @@ small { color: var(--muted); display: block; margin-top: 8px; }
         <option value="ja">日本語</option>
         <option value="es">Español</option>
       </select>
-      <div id="status" class="status-pill hidden"></div>
       <div class="hero-actions">
         <button id="saveButtonTop" onclick="saveConfig()" data-i18n="save">Save changes</button>
-        <button class="ghost" onclick="loadDevices()" data-i18n="refresh">Refresh devices</button>
+        <button class="ghost" onclick="loadDevices(true)" data-i18n="refresh">Refresh devices</button>
       </div>
     </div>
   </header>
@@ -678,7 +691,18 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
   </section>
 </div>
+<div id="toast" class="toast"></div>
 <script>
+let toastTimer = null;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + (type || 'info');
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
 function setSelectOptions(selectId, options, selectedValue) {
   const select = document.getElementById(selectId);
   select.innerHTML = '';
@@ -873,9 +897,16 @@ function detectVideoPreset(width, height) {
   return 'custom';
 }
 
-async function loadDevices() {
-  const res = await fetch('/api/devices');
-  const data = await res.json();
+async function loadDevices(showToast) {
+  let data;
+  try {
+    const res = await fetch('/api/devices');
+    data = await res.json();
+  } catch (e) {
+    toast(t('loadFail') + ': ' + e.message, 'error');
+    return;
+  }
+  if (showToast) toast(t('refreshed'), 'info');
   document.getElementById('audioInputs').innerText = data.audioInputs;
   document.getElementById('audioOutputs').innerText = data.audioOutputs;
   document.getElementById('videoDevices').innerText = data.videoDevices.join('\n');
@@ -960,8 +991,14 @@ async function loadDevices() {
 }
 
 async function loadConfig() {
-  const res = await fetch('/api/config');
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/api/config');
+    data = await res.json();
+  } catch (e) {
+    toast(t('loadFail') + ': ' + e.message, 'error');
+    return;
+  }
   document.getElementById('videoName').value = data.video.name;
   document.getElementById('videoDevicePath').value = data.video.device_path;
   document.getElementById('videoWidth').value = data.video.width;
@@ -1094,9 +1131,13 @@ async function saveConfig() {
 
   payload.web.port = Number(document.getElementById('webPort').value);
 
-  const res = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  const result = await res.json();
-  document.getElementById('status').innerText = result.message || t('saved');
+  try {
+    const res = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const result = await res.json();
+    toast(result.ok ? t('saved') : (result.message || t('saveFail')), result.ok ? 'success' : 'error');
+  } catch (e) {
+    toast(t('saveFail') + ': ' + e.message, 'error');
+  }
 }
 
 document.getElementById('langSelect').value = currentLang;
