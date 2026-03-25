@@ -608,8 +608,10 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Use system monotonic clock — same timebase as video for A/V sync.
-        frame.header.timestamp = crate::timebase::monotonic_100ns();
+        // Derive timestamp from audio sample count, not system clock.
+        // Prevents drift between system clock and audio hardware clock.
+        frame.header.timestamp = *audio_timestamp;
+        *audio_timestamp += 10_000_000i64 * samples_per_channel as i64 / sample_rate as i64;
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
