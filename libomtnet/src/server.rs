@@ -266,11 +266,10 @@ async fn handle_connection(
         let mut current_quality: u8 = 0;
 
         while !producer_closed.load(Ordering::Relaxed) {
-            // Pick video channel based on quality level
+            // Pick video channel based on quality level (default=SQ)
             let frame = tokio::select! {
-                v = rx_video.recv() => v,
+                v = rx_video_sq.recv(), if current_quality == 0 || current_quality == 2 => v,
                 v = rx_video_lq.recv(), if current_quality == 1 => v,
-                v = rx_video_sq.recv(), if current_quality == 2 => v,
                 v = rx_video_hq.recv(), if current_quality >= 3 => v,
                 a = rx_audio.recv() => a,
                 m = rx_meta.recv() => m,

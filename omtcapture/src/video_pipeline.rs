@@ -436,19 +436,9 @@ mod linux {
                     }
                 }
             }
-            // Also create the default instance (used for tx.video fallback)
-            unsafe {
-                let inst = root::VMX_Create(
-                    size,
-                    vmx_profile_from_quality_level(current_quality_level),
-                    root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
-                );
-                if !inst.is_null() {
-                    let _ = root::VMX_SetThreads(inst, 2);
-                    vmx_instance = Some(inst);
-                } else {
-                    eprintln!("VMX create failed, sending raw video codec.");
-                }
+            // Use the SQ instance as the default vmx_instance for preview/fallback
+            if let Some(sq) = quality_instances.iter().find(|q| q.level == 2) {
+                vmx_instance = Some(sq.inst);
             }
             if !quality_instances.is_empty() {
                 println!(
@@ -481,40 +471,8 @@ mod linux {
                 );
                 preview_enabled = !preview_sinks.is_empty();
             }
-            let new_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
-            if new_quality_level != current_quality_level {
-                if let Some(inst) = vmx_instance {
-                    unsafe {
-                        let previous_quality = root::VMX_GetQuality(inst);
-                        root::VMX_Destroy(inst);
-                        let size = root::VMX_SIZE {
-                            width: encode_width as i32,
-                            height: encode_height as i32,
-                        };
-                        let new_inst = root::VMX_Create(
-                            size,
-                            vmx_profile_from_quality_level(new_quality_level),
-                            root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
-                        );
-                        if !new_inst.is_null() {
-                            let _ = root::VMX_SetThreads(new_inst, 2);
-                            root::VMX_SetQuality(new_inst, previous_quality);
-                            vmx_instance = Some(new_inst);
-                            current_quality_level = new_quality_level;
-                            println!(
-                                "VMX profile switched due to receiver quality hint: level={}",
-                                new_quality_level
-                            );
-                        } else {
-                            vmx_instance = None;
-                            eprintln!(
-                                "VMX recreate failed for quality level {}",
-                                new_quality_level
-                            );
-                        }
-                    }
-                }
-            }
+            // Quality-level switching is handled by per-quality VMX instances.
+            // No need to recreate the default instance.
 
             let (raw_data, _) = match stream.next() {
                 Ok(res) => {
@@ -790,11 +748,7 @@ mod linux {
             let _ = ctx.child.kill();
             let _ = ctx.child.wait();
         }
-        if let Some(inst) = vmx_instance {
-            unsafe {
-                root::VMX_Destroy(inst);
-            }
-        }
+        // vmx_instance points to one of the quality_instances (SQ), don't double-free.
         for qi in &quality_instances {
             unsafe {
                 root::VMX_Destroy(qi.inst);
