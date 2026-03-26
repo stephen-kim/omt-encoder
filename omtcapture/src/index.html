@@ -525,7 +525,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
     <div>
       <div class="section-label" data-i18n="statClients">Clients</div>
-      <div id="statClients" style="font-size:20px;font-weight:700;margin-top:4px;">—</div>
+      <div id="statClients" style="font-size:14px;font-weight:600;margin-top:4px;line-height:1.6;">—</div>
     </div>
   </div>
 
@@ -1081,17 +1081,20 @@ async function refreshStats() {
     if (conns.length === 0) {
       document.getElementById('statClients').textContent = '—';
     } else {
-      // Group by addr, show subscriptions
-      const grouped = {};
+      // Merge connections per IP
+      const byAddr = {};
       conns.forEach(c => {
-        if (!grouped[c.addr]) grouped[c.addr] = [];
-        const parts = [];
-        if (c.video) parts.push('Video');
-        if (c.audio) parts.push('Audio');
-        if (c.video && c.quality) parts.push(c.quality);
-        grouped[c.addr].push(parts.join('+') || '...');
+        if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '' };
+        if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; }
+        if (c.audio) byAddr[c.addr].audio = true;
       });
-      const lines = Object.entries(grouped).map(([addr, subs]) => `${addr} (${subs.join(', ')})`);
+      const lines = Object.entries(byAddr).map(([addr, info]) => {
+        const parts = [];
+        if (info.video) parts.push('V');
+        if (info.audio) parts.push('A');
+        const q = info.quality && info.quality !== 'Default' ? ' ' + info.quality : '';
+        return `${addr} [${parts.join('+')}${q}]`;
+      });
       document.getElementById('statClients').innerHTML = lines.join('<br>');
     }
   } catch(e) {}
