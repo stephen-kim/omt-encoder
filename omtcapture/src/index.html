@@ -525,7 +525,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
     <div>
       <div class="section-label" data-i18n="statClients">Clients</div>
-      <div id="statClients" style="font-size:14px;font-weight:600;margin-top:4px;line-height:1.6;">—</div>
+      <div id="statClients" style="font-size:20px;font-weight:700;margin-top:4px;">0</div>
     </div>
   </div>
 
@@ -624,6 +624,13 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
       <div id="previewOutputs"></div>
       <div class="help" data-i18n="outputsHelp">Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).</div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div id="clientsCard" class="card" style="grid-column: 1 / -1; display:none;">
+      <div class="card-title" data-i18n="statClients">Clients</div>
+      <div id="clientsList" style="font-size:13px;line-height:1.8;"></div>
     </div>
   </section>
 
@@ -1078,24 +1085,29 @@ async function refreshStats() {
     document.getElementById('statMem').textContent = s.mem || '—';
     document.getElementById('statVideo').textContent = s.videoFormat || '—';
     const conns = s.connections || [];
-    if (conns.length === 0) {
-      document.getElementById('statClients').textContent = '—';
-    } else {
-      // Merge connections per IP
-      const byAddr = {};
-      conns.forEach(c => {
-        if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '' };
-        if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; }
-        if (c.audio) byAddr[c.addr].audio = true;
-      });
-      const lines = Object.entries(byAddr).map(([addr, info]) => {
+    // Merge per IP
+    const byAddr = {};
+    conns.forEach(c => {
+      if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '' };
+      if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; }
+      if (c.audio) byAddr[c.addr].audio = true;
+    });
+    const ips = Object.keys(byAddr);
+    document.getElementById('statClients').textContent = ips.length;
+    const card = document.getElementById('clientsCard');
+    const list = document.getElementById('clientsList');
+    if (ips.length > 0) {
+      card.style.display = '';
+      list.innerHTML = ips.map(addr => {
+        const info = byAddr[addr];
         const parts = [];
-        if (info.video) parts.push('V');
-        if (info.audio) parts.push('A');
-        const q = info.quality && info.quality !== 'Default' ? ' ' + info.quality : '';
-        return `${addr} [${parts.join('+')}${q}]`;
-      });
-      document.getElementById('statClients').innerHTML = lines.join('<br>');
+        if (info.video) parts.push('Video');
+        if (info.audio) parts.push('Audio');
+        const q = info.quality && info.quality !== 'Default' ? ` (${info.quality})` : '';
+        return `<div>${addr} — ${parts.join(', ')}${q}</div>`;
+      }).join('');
+    } else {
+      card.style.display = 'none';
     }
   } catch(e) {}
 }
