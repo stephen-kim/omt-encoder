@@ -528,7 +528,6 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <div class="help" data-i18n="useNativeHelp">Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.</div>
 
       <div id="videoTransformFields">
-        <div class="native-lock"><span data-i18n="nativeLock">Native input mode is enabled. Disable it to edit transforms.</span> <a href="#" onclick="document.getElementById('videoUseNative').checked=false;toggleNativeInputs();return false;" style="color:var(--accent-2);cursor:pointer;text-decoration:underline;" data-i18n="nativeUnlock">Disable</a></div>
         <label data-i18n="resPreset">Resolution preset</label>
         <select id="videoPreset" onchange="applyVideoPreset()">
           <option value="custom" data-i18n="custom">Custom</option>
