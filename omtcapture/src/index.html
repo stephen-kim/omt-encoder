@@ -50,7 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
-    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed",
+    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format",
   },
   ko: {
     title: "컨트롤 데크", kicker: "OMT Capture",
@@ -96,7 +96,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
-    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패",
+    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식",
   },
   ja: {
     title: "コントロールデッキ", kicker: "OMT Capture",
@@ -142,7 +142,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
-    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗",
+    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式",
   },
   es: {
     title: "Panel de Control", kicker: "OMT Capture",
@@ -188,7 +188,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
-    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar",
+    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato",
   },
 };
 function detectLang() {
@@ -594,7 +594,12 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
       <div class="help" data-i18n="previewHelp">Output captured video to framebuffer devices (SPI LCD, HDMI out).</div>
 
-      <label data-i18n="outputs">Outputs</label>
+      <div id="previewHeader" class="hidden" style="display:none;grid-template-columns:auto 1fr 70px 100px;gap:8px;margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;">
+        <span></span>
+        <span data-i18n="colDevice">Device</span>
+        <span>FPS</span>
+        <span data-i18n="colFormat">Format</span>
+      </div>
       <div id="previewOutputs"></div>
       <div class="help" data-i18n="outputsHelp">Enable each output and set its FPS. Use 0 for full framerate (HDMI passthrough).</div>
     </div>
@@ -887,6 +892,12 @@ async function loadDevices(showToast) {
   const existingOutputs = config.preview.outputs || [];
   const existingMap = {};
   existingOutputs.forEach(o => { existingMap[o.device] = o; });
+  const previewHeader = document.getElementById('previewHeader');
+  if (fbOptions.length > 0) {
+    previewHeader.style.display = 'grid';
+  } else {
+    previewHeader.style.display = 'none';
+  }
   fbOptions.forEach(opt => {
     const row = document.createElement('div');
     row.className = 'preview-output-row';
