@@ -608,9 +608,22 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Use system monotonic clock for actual capture time.
-        // Sample-count timestamps drift because USB audio clock != system clock.
-        frame.header.timestamp = crate::timebase::monotonic_100ns();
+        // Hybrid timestamp: sample-count based (jitter-free) with periodic
+        // wall-clock drift correction (prevents long-term desync).
+        let frame_interval = 10_000_000i64 * samples_per_channel as i64 / sample_rate as i64;
+        let wall = crate::timebase::monotonic_100ns();
+        if *audio_timestamp == 0 {
+            // First frame: anchor to wall clock
+            *audio_timestamp = wall;
+        } else {
+            *audio_timestamp += frame_interval;
+            // Correct drift if > 1 frame interval from wall clock
+            let drift = wall - *audio_timestamp;
+            if drift > frame_interval || drift < -frame_interval {
+                *audio_timestamp = wall;
+            }
+        }
+        frame.header.timestamp = *audio_timestamp;
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
