@@ -593,7 +593,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
       <div class="help" data-i18n="previewHelp">Output captured video to framebuffer devices (SPI LCD, HDMI out).</div>
 
-      <div id="previewHeader" class="hidden" style="display:none;grid-template-columns:auto 1fr 70px 100px;gap:8px;margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;">
+      <div id="previewHeader" style="display:none;grid-template-columns:auto 1fr 70px 100px;gap:8px;margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;">
         <span></span>
         <span data-i18n="colDevice">Device</span>
         <span>FPS</span>
@@ -892,11 +892,8 @@ async function loadDevices(showToast) {
   const existingMap = {};
   existingOutputs.forEach(o => { existingMap[o.device] = o; });
   const previewHeader = document.getElementById('previewHeader');
-  if (fbOptions.length > 0) {
-    previewHeader.style.display = 'grid';
-  } else {
-    previewHeader.style.display = 'none';
-  }
+  previewHeader.style.display = fbOptions.length > 0 ? 'grid' : 'none';
+  applyI18n();
   fbOptions.forEach(opt => {
     const row = document.createElement('div');
     row.className = 'preview-output-row';
