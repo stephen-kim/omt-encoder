@@ -600,6 +600,10 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
       <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
       <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
+
+      <label data-i18n="webPort">Web port</label>
+      <input id="webPort" type="number" />
+      <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
     </div>
   </section>
 
@@ -623,24 +627,23 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
   </section>
 
-  <section class="grid two">
-    <div class="card">
-      <div class="card-title" data-i18n="webService">Web Service</div>
-      <label data-i18n="webPort">Web port</label>
-      <input id="webPort" type="number" />
-      <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
-    </div>
-
-    <div class="card">
+  <section class="grid">
+    <div class="card" style="grid-column: 1 / -1;">
       <div class="card-title" data-i18n="devices">Devices</div>
-      <div class="section-label" data-i18n="audioInputs">Audio inputs</div>
-      <pre id="audioInputs"></pre>
-      <div class="section-label" data-i18n="audioOutputs">Audio outputs</div>
-      <pre id="audioOutputs"></pre>
-      <div class="section-label" data-i18n="videoDevices">Video devices</div>
-      <pre id="videoDevices"></pre>
-      <div class="section-label" data-i18n="framebuffers">Framebuffers</div>
-      <pre id="framebuffers"></pre>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+          <div class="section-label" data-i18n="audioInputs">Audio inputs</div>
+          <pre id="audioInputs"></pre>
+          <div class="section-label" data-i18n="audioOutputs">Audio outputs</div>
+          <pre id="audioOutputs"></pre>
+        </div>
+        <div>
+          <div class="section-label" data-i18n="videoDevices">Video devices</div>
+          <pre id="videoDevices"></pre>
+          <div class="section-label" data-i18n="framebuffers">Framebuffers</div>
+          <pre id="framebuffers"></pre>
+        </div>
+      </div>
     </div>
   </section>
 </div>
@@ -1074,8 +1077,23 @@ async function refreshStats() {
     document.getElementById('statCpu').textContent = s.cpu || '—';
     document.getElementById('statMem').textContent = s.mem || '—';
     document.getElementById('statVideo').textContent = s.videoFormat || '—';
-    const clients = (s.connections || []).map(c => c.peer).filter((v,i,a) => a.indexOf(v)===i);
-    document.getElementById('statClients').textContent = clients.length > 0 ? clients.join(', ') : '—';
+    const conns = s.connections || [];
+    if (conns.length === 0) {
+      document.getElementById('statClients').textContent = '—';
+    } else {
+      // Group by addr, show subscriptions
+      const grouped = {};
+      conns.forEach(c => {
+        if (!grouped[c.addr]) grouped[c.addr] = [];
+        const parts = [];
+        if (c.video) parts.push('Video');
+        if (c.audio) parts.push('Audio');
+        if (c.video && c.quality) parts.push(c.quality);
+        grouped[c.addr].push(parts.join('+') || '...');
+      });
+      const lines = Object.entries(grouped).map(([addr, subs]) => `${addr} (${subs.join(', ')})`);
+      document.getElementById('statClients').innerHTML = lines.join('<br>');
+    }
   } catch(e) {}
 }
 setInterval(refreshStats, 3000);

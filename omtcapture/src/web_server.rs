@@ -51,6 +51,7 @@ pub struct WebState {
     pub settings: Arc<RwLock<Settings>>,
     pub settings_tx: watch::Sender<Settings>,
     pub config_path: String,
+    pub server: Option<Arc<libomtnet::server::OMTServer>>,
 }
 
 pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
@@ -323,11 +324,15 @@ async fn get_status() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true }))
 }
 
-async fn get_stats() -> impl IntoResponse {
+async fn get_stats(State(state): State<WebState>) -> impl IntoResponse {
     let cpu = get_cpu_usage();
     let mem = get_mem_usage();
-    let connections = get_connections();
     let video_format = get_video_format();
+    let connections = if let Some(ref server) = state.server {
+        server.get_conn_info().await
+    } else {
+        vec![]
+    };
     Json(serde_json::json!({
         "cpu": cpu,
         "mem": mem,
@@ -374,29 +379,6 @@ fn get_mem_usage() -> String {
         }
     }
     "N/A".to_string()
-}
-
-fn get_connections() -> Vec<serde_json::Value> {
-    // Parse ss output for OMT port connections
-    let output = Command::new("ss")
-        .args(["-tn", "state", "established", "sport", "=", ":6400"])
-        .output();
-    let mut conns = Vec::new();
-    if let Ok(o) = output {
-        let text = String::from_utf8_lossy(&o.stdout);
-        for line in text.lines().skip(1) {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 4 {
-                let peer = parts[3].to_string();
-                // Remove port from peer address for cleaner display
-                let addr = peer.rsplitn(2, ':').last().unwrap_or(&peer).to_string();
-                conns.push(serde_json::json!({ "peer": addr }));
-            }
-        }
-    }
-    // Deduplicate by peer address
-    conns.dedup_by(|a, b| a["peer"] == b["peer"]);
-    conns
 }
 
 fn get_video_format() -> String {

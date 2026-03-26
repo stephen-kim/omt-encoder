@@ -2,6 +2,7 @@ use crate::channel::OMTChannel;
 use crate::enums::OMTFrameType;
 use crate::frame::OMTFrame;
 use futures::{SinkExt, StreamExt};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -74,6 +75,15 @@ impl OMTServer {
         self.active_quality_mask.clone()
     }
 
+    pub async fn get_conn_info(&self) -> Vec<ConnInfo> {
+        let st = self.metadata_state.lock().await;
+        st.conn_info.values().cloned().collect()
+    }
+
+    pub fn metadata_state(&self) -> Arc<Mutex<ServerMetadataState>> {
+        Arc::clone(&self.metadata_state)
+    }
+
     pub async fn set_sender_info_xml(&self, xml: Option<String>) {
         self.metadata_state.lock().await.sender_info_xml = xml.clone();
         // Match C# OMTSend.SetSenderInformation: push updates immediately to metadata subscribers.
@@ -126,11 +136,12 @@ impl OMTServer {
             let quality_hint = Arc::clone(&self.suggested_quality_hint);
             let quality_mask = Arc::clone(&self.active_quality_mask);
             let this_conn_id = conn_id;
+            let peer_addr = addr.ip().to_string();
             conn_id = conn_id.wrapping_add(1);
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, this_conn_id).await
+                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, this_conn_id, peer_addr).await
                 {
                     eprintln!("Connection error: {}", e);
                 }
@@ -160,7 +171,7 @@ fn configure_sender_socket(socket: &TcpStream) {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 struct ServerMetadataState {
     sender_info_xml: Option<String>,
     connection_metadata: Vec<String>,
@@ -168,6 +179,16 @@ struct ServerMetadataState {
     tally_preview: bool,
     tally_program: bool,
     per_connection_suggested_quality: HashMap<u64, u8>,
+    #[serde(rename = "connInfo")]
+    conn_info: HashMap<u64, ConnInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnInfo {
+    pub addr: String,
+    pub video: bool,
+    pub audio: bool,
+    pub quality: String,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +228,7 @@ async fn handle_connection(
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
     conn_id: u64,
+    peer_addr: String,
 ) -> Result<(), io::Error> {
     let _ = socket.set_nodelay(false);
     {
@@ -256,6 +278,12 @@ async fn handle_connection(
     {
         let mut st = metadata_state.lock().await;
         st.per_connection_suggested_quality.insert(conn_id, 0);
+        st.conn_info.insert(conn_id, ConnInfo {
+            addr: peer_addr.clone(),
+            video: false,
+            audio: false,
+            quality: "Default".to_string(),
+        });
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint, &active_quality_mask).await;
 
@@ -456,14 +484,24 @@ async fn handle_connection(
                 match result {
                     Ok(frame) => {
                         handle_subscription_frame(conn_id, &frame, &state).await;
-                        let (wants_video, quality) = {
+                        let (wants_video, wants_audio, quality, quality_name) = {
                             let st = state.lock().await;
                             let q = st.suggested_quality.as_deref()
                                 .map(quality_level_from_name).unwrap_or(0);
-                            (st.wants_video, q)
+                            let qn = st.suggested_quality.clone().unwrap_or_else(|| "Default".to_string());
+                            (st.wants_video, st.wants_audio, q, qn)
                         };
                         let _ = tx_wants_video.send(wants_video);
                         let _ = tx_quality_changed.send(quality);
+                        // Update conn_info
+                        {
+                            let mut ms = metadata_state.lock().await;
+                            if let Some(ci) = ms.conn_info.get_mut(&conn_id) {
+                                ci.video = wants_video;
+                                ci.audio = wants_audio;
+                                ci.quality = quality_name;
+                            }
+                        }
                         sync_connection_suggested_quality(
                             conn_id,
                             &state,
@@ -489,6 +527,7 @@ async fn handle_connection(
     let _ = send_task.await;
 
     remove_connection_suggested_quality(conn_id, &metadata_state, &suggested_quality_hint, &active_quality_mask).await;
+    { metadata_state.lock().await.conn_info.remove(&conn_id); }
     if let Some(e) = terminal_error {
         return Err(e);
     }

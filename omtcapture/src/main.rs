@@ -76,6 +76,8 @@ async fn main() -> Result<()> {
         settings: initial_settings,
     }));
 
+    let server = Arc::new(server);
+
     // Start Web Server
     let web_settings = shared_settings.read().await.web.clone();
     if web_settings.enabled {
@@ -83,6 +85,7 @@ async fn main() -> Result<()> {
             settings: shared_settings.clone(),
             settings_tx: settings_tx.clone(),
             config_path: config_path.to_string(),
+            server: Some(Arc::clone(&server)),
         };
 
         tokio::spawn(async move {
@@ -94,7 +97,7 @@ async fn main() -> Result<()> {
 
     let pipelines_for_updates = pipelines.clone();
     let tx_for_updates = tx.clone();
-    let server_for_updates = Arc::new(server);
+    let server_for_updates = Arc::clone(&server);
     let server_for_updates_task = Arc::clone(&server_for_updates);
     let mdns_for_updates = Arc::clone(&mdns_publisher);
     tokio::spawn(async move {
