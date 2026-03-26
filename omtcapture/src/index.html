@@ -579,82 +579,13 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <div id="audioInputDevices" class="check-grid"></div>
       <div class="help" data-i18n="captureHelp">Select up to two inputs to mix. Leave empty for silent.</div>
 
-      <div class="inline">
-        <div>
-          <label data-i18n="sampleRate">Sample rate (Hz)</label>
-          <input id="audioSampleRate" type="number" />
-        </div>
-        <div>
-          <label data-i18n="channels">Channels</label>
-          <input id="audioChannels" type="number" />
-        </div>
-      </div>
-      <div class="help" data-i18n="sampleRateHelp">Keep in sync with the HDMI source when possible.</div>
-
-      <label data-i18n="samplesPerCh">Samples per channel</label>
-      <input id="audioSamplesPerChannel" type="number" />
-      <div class="help" data-i18n="samplesPerChHelp">Audio packet size. Lower = lower latency, higher = more stability.</div>
-
       <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
       <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
       <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
-
-      <div class="section-label" data-i18n="alsaTuning">ALSA tuning</div>
-      <div class="inline">
-        <div>
-          <label data-i18n="bufferUsec">arecord buffer (usec)</label>
-          <input id="audioArecordBufferUsec" type="number" />
-        </div>
-        <div>
-          <label data-i18n="periodUsec">arecord period (usec)</label>
-          <input id="audioArecordPeriodUsec" type="number" />
-        </div>
-      </div>
-      <div class="help" data-i18n="alsaHelp">Larger buffers reduce underruns but add delay.</div>
-
-      <div class="inline">
-        <div>
-          <label data-i18n="restartReads">Restart after failed reads</label>
-          <input id="audioRestartAfterFailedReads" type="number" />
-        </div>
-        <div>
-          <label data-i18n="restartCooldown">Restart cooldown (ms)</label>
-          <input id="audioRestartCooldownMs" type="number" />
-        </div>
-      </div>
-      <div class="help" data-i18n="restartHelp">Auto-restarts the audio pipeline when the device stalls.</div>
-
-      <div class="section-label" data-i18n="monitorOutput">Monitor output</div>
-      <div class="check-row">
-        <input id="monitorEnabled" type="checkbox" />
-        <label for="monitorEnabled" data-i18n="monitorEnabled">Monitor enabled</label>
-      </div>
-      <label data-i18n="monitorDevice">Monitor device</label>
-      <select id="monitorDevice"></select>
-      <label data-i18n="monitorGain">Monitor gain</label>
-      <input id="monitorGain" type="number" step="0.01" />
-      <div class="help" data-i18n="monitorHelp">Applies only to the local monitor output.</div>
     </div>
   </section>
 
   <section class="grid two">
-    <div class="card">
-      <div class="card-title" data-i18n="transport">Transport</div>
-      <label data-i18n="audioQueue">Audio queue capacity</label>
-      <input id="sendAudioQueueCapacity" type="number" />
-      <div class="help" data-i18n="audioQueueHelp">Buffered audio packets before dropping oldest. Helps smooth jitter.</div>
-
-      <label data-i18n="videoQueue">Video queue capacity</label>
-      <input id="sendVideoQueueCapacity" type="number" />
-      <div class="help" data-i18n="videoQueueHelp">How many frames can wait before dropping. Keep small for low latency.</div>
-
-      <div class="check-row">
-        <input id="sendForceZeroTimestamps" type="checkbox" />
-        <label for="sendForceZeroTimestamps" data-i18n="forceZero">Force zero timestamps</label>
-      </div>
-      <div class="help" data-i18n="forceZeroHelp">Reduces receiver buffering. Can break strict A/V sync in some players.</div>
-    </div>
-
     <div class="card">
       <div class="card-title" data-i18n="preview">Preview / HDMI Passthrough</div>
       <div class="check-row">
@@ -675,7 +606,6 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <label data-i18n="webPort">Web port</label>
       <input id="webPort" type="number" />
       <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
-      <small data-i18n="webSmall">Video changes apply without reboot. Web port changes require restart.</small>
     </div>
 
     <div class="card">
@@ -922,7 +852,6 @@ async function loadDevices(showToast) {
   const fbOptions = await buildFramebufferOptions(data.framebuffers);
 
   const config = await (await fetch('/api/config')).json();
-  setSelectOptions('monitorDevice', outputs, config.audio.monitor.device);
   setSelectOptions('videoDevicePath', videoOptions, config.video.device_path);
   const audioContainer = document.getElementById('audioInputDevices');
   audioContainer.innerHTML = '';
@@ -1010,28 +939,13 @@ async function loadConfig() {
   document.getElementById('videoPreset').value = detectVideoPreset(data.video.width, data.video.height);
   toggleNativeInputs();
 
-  document.getElementById('audioSampleRate').value = data.audio.sample_rate;
-  document.getElementById('audioChannels').value = data.audio.channels;
-  document.getElementById('audioSamplesPerChannel').value = data.audio.samples_per_channel;
   document.getElementById('audioMixGain').value = data.audio.mix_gain;
   document.getElementById('gainDisplay').innerText = data.audio.mix_gain;
-  document.getElementById('audioArecordBufferUsec').value = data.audio.arecord_buffer_usec;
-  document.getElementById('audioArecordPeriodUsec').value = data.audio.arecord_period_usec;
-  document.getElementById('audioRestartAfterFailedReads').value = data.audio.restart_after_failed_reads;
-  document.getElementById('audioRestartCooldownMs').value = data.audio.restart_cooldown_ms;
-
-  document.getElementById('monitorEnabled').checked = data.audio.monitor.enabled;
-  document.getElementById('monitorGain').value = data.audio.monitor.gain;
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
   setPreviewOutputs(data.preview.outputs || []);
 
-  document.getElementById('sendAudioQueueCapacity').value = data.send.audio_queue_capacity;
-  document.getElementById('sendVideoQueueCapacity').value = data.send.video_queue_capacity;
-  document.getElementById('sendForceZeroTimestamps').checked = data.send.force_zero_timestamps;
-
   document.getElementById('webPort').value = data.web.port;
-  document.getElementById('status').innerText = 'Ready';
 }
 
 async function saveConfig() {
@@ -1105,29 +1019,11 @@ async function saveConfig() {
     payload.audio.hdmi_device = newHdmi;
     payload.audio.trs_device = newTrs;
   }
-  payload.audio.sample_rate = Number(document.getElementById('audioSampleRate').value);
-  payload.audio.channels = Number(document.getElementById('audioChannels').value);
-  payload.audio.samples_per_channel = Number(document.getElementById('audioSamplesPerChannel').value);
   payload.audio.mix_gain = Number(document.getElementById('audioMixGain').value);
-  payload.audio.arecord_buffer_usec = Number(document.getElementById('audioArecordBufferUsec').value);
-  payload.audio.arecord_period_usec = Number(document.getElementById('audioArecordPeriodUsec').value);
-  payload.audio.restart_after_failed_reads = Number(document.getElementById('audioRestartAfterFailedReads').value);
-  payload.audio.restart_cooldown_ms = Number(document.getElementById('audioRestartCooldownMs').value);
-
-  payload.audio.monitor.enabled = document.getElementById('monitorEnabled').checked;
-  payload.audio.monitor.device = document.getElementById('monitorDevice').value;
-  payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
   payload.preview.outputs = getPreviewOutputs();
   payload.preview.output_devices = getPreviewOutputDevices();
-
-  // Prevent accidental 0/NaN from empty inputs (which can trigger full pipeline restart).
-  const aq = Number(document.getElementById('sendAudioQueueCapacity').value);
-  const vq = Number(document.getElementById('sendVideoQueueCapacity').value);
-  if (Number.isFinite(aq) && aq >= 1) payload.send.audio_queue_capacity = aq;
-  if (Number.isFinite(vq) && vq >= 1) payload.send.video_queue_capacity = vq;
-  payload.send.force_zero_timestamps = document.getElementById('sendForceZeroTimestamps').checked;
 
   payload.web.port = Number(document.getElementById('webPort').value);
 
