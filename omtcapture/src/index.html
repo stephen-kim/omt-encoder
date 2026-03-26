@@ -50,7 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
-    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format",
+    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients",
   },
   ko: {
     title: "컨트롤 데크", kicker: "OMT Capture",
@@ -96,7 +96,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
-    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식",
+    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트",
   },
   ja: {
     title: "コントロールデッキ", kicker: "OMT Capture",
@@ -142,7 +142,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
-    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式",
+    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中",
   },
   es: {
     title: "Panel de Control", kicker: "OMT Capture",
@@ -188,7 +188,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
-    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato",
+    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes",
   },
 };
 function detectLang() {
@@ -509,6 +509,25 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
     </div>
   </header>
+
+  <div class="card" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:12px;padding:14px 18px;">
+    <div>
+      <div class="section-label">CPU</div>
+      <div id="statCpu" style="font-size:20px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div>
+      <div class="section-label" data-i18n="statMem">Memory</div>
+      <div id="statMem" style="font-size:20px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div>
+      <div class="section-label" data-i18n="statVideo">Video</div>
+      <div id="statVideo" style="font-size:20px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div>
+      <div class="section-label" data-i18n="statClients">Clients</div>
+      <div id="statClients" style="font-size:20px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+  </div>
 
   <section class="grid two">
     <div class="card">
@@ -1048,9 +1067,22 @@ async function saveConfig() {
   }
 }
 
+async function refreshStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const s = await res.json();
+    document.getElementById('statCpu').textContent = s.cpu || '—';
+    document.getElementById('statMem').textContent = s.mem || '—';
+    document.getElementById('statVideo').textContent = s.videoFormat || '—';
+    const clients = (s.connections || []).map(c => c.peer).filter((v,i,a) => a.indexOf(v)===i);
+    document.getElementById('statClients').textContent = clients.length > 0 ? clients.join(', ') : '—';
+  } catch(e) {}
+}
+setInterval(refreshStats, 3000);
+
 document.getElementById('langSelect').value = currentLang;
 applyI18n();
-loadConfig().then(loadDevices);
+loadConfig().then(loadDevices).then(refreshStats);
 </script>
 </body>
 </html>

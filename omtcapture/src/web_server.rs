@@ -61,6 +61,7 @@ pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
         .route("/api/fbname", get(get_fb_name))
         .route("/api/fbinfo", get(get_fb_info))
         .route("/api/status", get(get_status))
+        .route("/api/stats", get(get_stats))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -320,6 +321,102 @@ async fn get_fb_name(Query(query): Query<FbQuery>) -> impl IntoResponse {
 
 async fn get_status() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true }))
+}
+
+async fn get_stats() -> impl IntoResponse {
+    let cpu = get_cpu_usage();
+    let mem = get_mem_usage();
+    let connections = get_connections();
+    let video_format = get_video_format();
+    Json(serde_json::json!({
+        "cpu": cpu,
+        "mem": mem,
+        "connections": connections,
+        "videoFormat": video_format,
+    }))
+}
+
+fn get_cpu_usage() -> String {
+    // Read /proc/stat for overall CPU usage
+    if let Ok(stat) = fs::read_to_string("/proc/stat") {
+        if let Some(line) = stat.lines().next() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 {
+                let user: u64 = parts[1].parse().unwrap_or(0);
+                let nice: u64 = parts[2].parse().unwrap_or(0);
+                let system: u64 = parts[3].parse().unwrap_or(0);
+                let idle: u64 = parts[4].parse().unwrap_or(0);
+                let total = user + nice + system + idle;
+                if total > 0 {
+                    let used = user + nice + system;
+                    return format!("{}%", used * 100 / total);
+                }
+            }
+        }
+    }
+    "N/A".to_string()
+}
+
+fn get_mem_usage() -> String {
+    if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+        let mut total: u64 = 0;
+        let mut available: u64 = 0;
+        for line in meminfo.lines() {
+            if line.starts_with("MemTotal:") {
+                total = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+            } else if line.starts_with("MemAvailable:") {
+                available = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+        }
+        if total > 0 {
+            let used = total - available;
+            return format!("{} / {} MB", used / 1024, total / 1024);
+        }
+    }
+    "N/A".to_string()
+}
+
+fn get_connections() -> Vec<serde_json::Value> {
+    // Parse ss output for OMT port connections
+    let output = Command::new("ss")
+        .args(["-tn", "state", "established", "sport", "=", ":6400"])
+        .output();
+    let mut conns = Vec::new();
+    if let Ok(o) = output {
+        let text = String::from_utf8_lossy(&o.stdout);
+        for line in text.lines().skip(1) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 {
+                let peer = parts[4].to_string();
+                // Remove port from peer address for cleaner display
+                let addr = peer.rsplitn(2, ':').last().unwrap_or(&peer).to_string();
+                conns.push(serde_json::json!({ "peer": addr }));
+            }
+        }
+    }
+    // Deduplicate by peer address
+    conns.dedup_by(|a, b| a["peer"] == b["peer"]);
+    conns
+}
+
+fn get_video_format() -> String {
+    // Read current config to get active video format
+    if let Ok(config) = fs::read_to_string("/opt/omtcapture-rs/config.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&config) {
+            let w = v["video"]["width"].as_u64().unwrap_or(0);
+            let h = v["video"]["height"].as_u64().unwrap_or(0);
+            let codec = v["video"]["codec"].as_str().unwrap_or("?");
+            let fps_n = v["video"]["frame_rate_n"].as_u64().unwrap_or(0);
+            let fps_d = v["video"]["frame_rate_d"].as_u64().unwrap_or(1);
+            let native = v["video"]["use_native_format"].as_bool().unwrap_or(false);
+            let fps = if fps_d > 0 { fps_n as f64 / fps_d as f64 } else { 0.0 };
+            if native {
+                return format!("Native ({:.1} fps)", fps);
+            }
+            return format!("{}x{} {} {:.1} fps", w, h, codec, fps);
+        }
+    }
+    "Unknown".to_string()
 }
 
 fn run_command(cmd: &str, args: &[&str]) -> String {
