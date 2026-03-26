@@ -400,11 +400,43 @@ mod linux {
         ];
 
         let mut current_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
+        // Multi-quality VMX instances: encode at LQ, SQ, HQ simultaneously.
+        struct QualityInstance {
+            inst: *mut root::VMX_INSTANCE,
+            level: u8,
+            buffer: Vec<u8>,
+        }
+        let mut quality_instances: Vec<QualityInstance> = Vec::new();
+
         if codec_to_vmx_image_format(encode_codec).is_some() {
             let size = root::VMX_SIZE {
                 width: encode_width as i32,
                 height: encode_height as i32,
             };
+            let buf_size = (frame_size_bytes(encode_codec, encode_width, encode_height) * 2)
+                .max(8 * 1024 * 1024);
+            for &(level, profile) in &[
+                (1u8, root::VMX_PROFILE_VMX_PROFILE_OMT_LQ),
+                (2u8, root::VMX_PROFILE_VMX_PROFILE_OMT_SQ),
+                (3u8, root::VMX_PROFILE_VMX_PROFILE_OMT_HQ),
+            ] {
+                unsafe {
+                    let inst = root::VMX_Create(
+                        size,
+                        profile,
+                        root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
+                    );
+                    if !inst.is_null() {
+                        let _ = root::VMX_SetThreads(inst, 2);
+                        quality_instances.push(QualityInstance {
+                            inst,
+                            level,
+                            buffer: vec![0u8; buf_size],
+                        });
+                    }
+                }
+            }
+            // Also create the default instance (used for tx.video fallback)
             unsafe {
                 let inst = root::VMX_Create(
                     size,
@@ -412,11 +444,17 @@ mod linux {
                     root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
                 );
                 if !inst.is_null() {
-                    vmx_instance = Some(inst);
                     let _ = root::VMX_SetThreads(inst, 2);
+                    vmx_instance = Some(inst);
                 } else {
                     eprintln!("VMX create failed, sending raw video codec.");
                 }
+            }
+            if !quality_instances.is_empty() {
+                println!(
+                    "Multi-quality encoding enabled: {} quality levels",
+                    quality_instances.len()
+                );
             }
         } else {
             eprintln!(
@@ -649,8 +687,54 @@ mod linux {
                 );
                 startup_debug_frames += 1;
             }
-            // enqueue_video always succeeds (latest-wins semantics).
+            // Send default quality to tx.video (for connections without quality preference).
             send.enqueue_video(frame);
+
+            // Encode and send at each quality level for quality-specific channels.
+            if !quality_instances.is_empty() {
+                for qi in quality_instances.iter_mut() {
+                    let err = unsafe {
+                        vmx_encode_frame(
+                            qi.inst,
+                            frame_codec,
+                            payload.as_ptr(),
+                            frame_height,
+                            frame_stride as i32,
+                        )
+                    };
+                    if err == root::VMX_ERR_VMX_ERR_OK {
+                        let compressed_len = unsafe {
+                            root::VMX_SaveTo(qi.inst, qi.buffer.as_mut_ptr(), qi.buffer.len() as i32)
+                        };
+                        if compressed_len > 0 {
+                            let preview_payload_len =
+                                unsafe { root::VMX_GetEncodedPreviewLength(qi.inst) };
+                            let preview_total_len = if preview_payload_len > 0 {
+                                Some(OMTVideoHeader::SIZE as i32 + preview_payload_len)
+                            } else {
+                                None
+                            };
+                            let mut qframe = OMTFrame::new(OMTFrameType::Video);
+                            qframe.video_header = Some(OMTVideoHeader {
+                                codec: OMTCodec::VMX1 as i32,
+                                width: frame_width as i32,
+                                height: frame_height as i32,
+                                frame_rate_n: effective_output_rate_n as i32,
+                                frame_rate_d: effective_output_rate_d as i32,
+                                aspect_ratio: frame_width as f32 / frame_height as f32,
+                                flags: network_flags,
+                                color_space: 709,
+                            });
+                            qframe.data =
+                                Bytes::copy_from_slice(&qi.buffer[..compressed_len as usize]);
+                            qframe.update_data_length();
+                            qframe.preview_data_length = preview_total_len;
+                            send.send_video_quality(qframe, qi.level);
+                        }
+                    }
+                }
+            }
+
             frame_count += 1;
             sent_bytes += payload_len;
             fps_window_frames += 1;
@@ -710,6 +794,11 @@ mod linux {
         if let Some(inst) = vmx_instance {
             unsafe {
                 root::VMX_Destroy(inst);
+            }
+        }
+        for qi in &quality_instances {
+            unsafe {
+                root::VMX_Destroy(qi.inst);
             }
         }
 
