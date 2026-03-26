@@ -15,7 +15,7 @@ const I18N = {
     sourceName: "Source name", sourceNameHelp: "Shown in the receiver list. Keep it short and unique.",
     useNative: "Use native input format (no transform)",
     useNativeHelp: "Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.",
-    nativeLock: "Native input mode is enabled. Disable it to edit transforms.",
+    nativeLock: "Native input mode is enabled.", nativeUnlock: "Disable",
     resPreset: "Resolution preset", custom: "Custom",
     presetHelp: "Choose a preset or dial in a custom format.",
     width: "Width", height: "Height",
@@ -61,7 +61,7 @@ const I18N = {
     sourceName: "소스 이름", sourceNameHelp: "수신기 목록에 표시됩니다. 짧고 고유하게 지정하세요.",
     useNative: "네이티브 입력 형식 사용 (변환 없음)",
     useNativeHelp: "최저 지연을 위해 스케일링과 픽셀 변환을 건너뜁니다. 일부 수신기(OBS OMT 포함)는 VMX1을 기대하며 네이티브 형식에서 검은 화면이 나올 수 있습니다.",
-    nativeLock: "네이티브 입력 모드가 활성화되어 있습니다. 변환을 편집하려면 비활성화하세요.",
+    nativeLock: "네이티브 입력 모드가 활성화되어 있습니다.", nativeUnlock: "비활성화",
     resPreset: "해상도 프리셋", custom: "사용자 지정",
     presetHelp: "프리셋을 선택하거나 사용자 지정 형식을 설정하세요.",
     width: "너비", height: "높이",
@@ -107,7 +107,7 @@ const I18N = {
     sourceName: "ソース名", sourceNameHelp: "受信機リストに表示されます。短くユニークに。",
     useNative: "ネイティブ入力形式を使用（変換なし）",
     useNativeHelp: "最低遅延のためスケーリングとピクセル変換をスキップします。一部の受信機（OBS OMT含む）はVMX1を想定しており、ネイティブ形式では黒画面になる場合があります。",
-    nativeLock: "ネイティブ入力モードが有効です。変換を編集するには無効にしてください。",
+    nativeLock: "ネイティブ入力モードが有効です。", nativeUnlock: "無効にする",
     resPreset: "解像度プリセット", custom: "カスタム",
     presetHelp: "プリセットを選択するかカスタム形式を設定してください。",
     width: "幅", height: "高さ",
@@ -153,7 +153,7 @@ const I18N = {
     sourceName: "Nombre de fuente", sourceNameHelp: "Se muestra en la lista de receptores. Mantenlo corto y unico.",
     useNative: "Usar formato nativo (sin transformacion)",
     useNativeHelp: "Omite el escalado y la conversion de pixeles para la menor latencia. Algunos receptores (incluido OBS OMT) esperan VMX1 y pueden mostrar una pantalla negra con formatos nativos.",
-    nativeLock: "El modo de entrada nativo esta habilitado. Desactivalo para editar transformaciones.",
+    nativeLock: "El modo de entrada nativo esta habilitado.", nativeUnlock: "Desactivar",
     resPreset: "Preset de resolucion", custom: "Personalizado",
     presetHelp: "Elige un preset o configura un formato personalizado.",
     width: "Ancho", height: "Alto",
@@ -528,7 +528,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <div class="help" data-i18n="useNativeHelp">Bypass scaling and pixel conversion for lowest latency. Some receivers (including OBS OMT) expect VMX1 and may show a black screen with native formats.</div>
 
       <div id="videoTransformFields">
-        <div class="native-lock" data-i18n="nativeLock">Native input mode is enabled. Disable it to edit transforms.</div>
+        <div class="native-lock"><span data-i18n="nativeLock">Native input mode is enabled. Disable it to edit transforms.</span> <a href="#" onclick="document.getElementById('videoUseNative').checked=false;toggleNativeInputs();return false;" style="color:var(--accent-2);cursor:pointer;text-decoration:underline;" data-i18n="nativeUnlock">Disable</a></div>
         <label data-i18n="resPreset">Resolution preset</label>
         <select id="videoPreset" onchange="applyVideoPreset()">
           <option value="custom" data-i18n="custom">Custom</option>
