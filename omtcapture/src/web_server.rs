@@ -386,8 +386,8 @@ fn get_connections() -> Vec<serde_json::Value> {
         let text = String::from_utf8_lossy(&o.stdout);
         for line in text.lines().skip(1) {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 5 {
-                let peer = parts[4].to_string();
+            if parts.len() >= 4 {
+                let peer = parts[3].to_string();
                 // Remove port from peer address for cleaner display
                 let addr = peer.rsplitn(2, ':').last().unwrap_or(&peer).to_string();
                 conns.push(serde_json::json!({ "peer": addr }));
