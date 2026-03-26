@@ -591,6 +591,7 @@ mod linux {
                     )
                 };
 
+            let raw_payload = payload.clone(); // Keep a copy for multi-quality encode
             let network_frame = if let (Some(inst), Some(_fmt)) =
                 (vmx_instance, codec_to_vmx_image_format(frame_codec))
             {
@@ -687,17 +688,15 @@ mod linux {
                 );
                 startup_debug_frames += 1;
             }
-            // Send default quality to tx.video (for connections without quality preference).
-            send.enqueue_video(frame);
-
             // Encode and send at each quality level for quality-specific channels.
+            // Must happen BEFORE frame.data consumes payload via Bytes::copy_from_slice.
             if !quality_instances.is_empty() {
                 for qi in quality_instances.iter_mut() {
                     let err = unsafe {
                         vmx_encode_frame(
                             qi.inst,
                             frame_codec,
-                            payload.as_ptr(),
+                            raw_payload.as_ptr(),
                             frame_height,
                             frame_stride as i32,
                         )
