@@ -14,6 +14,9 @@ use crate::constants::{NETWORK_RECEIVE_BUFFER, NETWORK_SEND_BUFFER, NETWORK_SEND
 #[derive(Clone)]
 pub struct ServerSenders {
     pub video: broadcast::Sender<OMTFrame>,
+    pub video_lq: broadcast::Sender<OMTFrame>,
+    pub video_sq: broadcast::Sender<OMTFrame>,
+    pub video_hq: broadcast::Sender<OMTFrame>,
     pub audio: broadcast::Sender<OMTFrame>,
     pub metadata: broadcast::Sender<OMTFrame>,
 }
@@ -34,13 +37,19 @@ impl OMTServer {
         // IMPORTANT: video/audio are sent on separate TCP connections by the receiver, so
         // separating channels lets us tune buffering independently.
         let (tx_video, _) = broadcast::channel(8);
-        let (tx_audio, _) = broadcast::channel(256); // large buffer to absorb TCP backpressure
+        let (tx_video_lq, _) = broadcast::channel(8);
+        let (tx_video_sq, _) = broadcast::channel(8);
+        let (tx_video_hq, _) = broadcast::channel(8);
+        let (tx_audio, _) = broadcast::channel(256);
         let (tx_meta, _) = broadcast::channel(64);
 
         Ok(OMTServer {
             listener,
             tx: ServerSenders {
                 video: tx_video,
+                video_lq: tx_video_lq,
+                video_sq: tx_video_sq,
+                video_hq: tx_video_hq,
                 audio: tx_audio,
                 metadata: tx_meta,
             },
@@ -199,6 +208,9 @@ async fn handle_connection(
 
     let channel = OMTChannel::new(socket);
     let mut rx_video = tx.video.subscribe();
+    let mut rx_video_lq = tx.video_lq.subscribe();
+    let mut rx_video_sq = tx.video_sq.subscribe();
+    let mut rx_video_hq = tx.video_hq.subscribe();
     let mut rx_audio = tx.audio.subscribe();
     let mut rx_meta = tx.metadata.subscribe();
 
@@ -243,6 +255,7 @@ async fn handle_connection(
     // - Audio/metadata are queued with a small bound; if full, we drop to avoid runaway latency.
     let (tx_video_latest, mut rx_video_latest) = watch::channel::<Option<OMTFrame>>(None);
     let (tx_other, mut rx_other) = mpsc::channel::<OMTFrame>(512);
+    let (tx_quality_changed, mut rx_quality_changed) = watch::channel(0u8);
 
     // Producer: Broadcast -> per-connection channels (non-blocking).
     let prod_state = Arc::clone(&state);
@@ -250,37 +263,33 @@ async fn handle_connection(
     let producer_closed = Arc::clone(&connection_closed);
     let prod_conn_id = conn_id;
     let producer = tokio::spawn(async move {
-        let mut lagged_count: u64 = 0;
-        let mut audio_drop_count: u64 = 0;
-        let mut last_diag = tokio::time::Instant::now();
+        let mut current_quality: u8 = 0;
 
         while !producer_closed.load(Ordering::Relaxed) {
+            // Pick video channel based on quality level
             let frame = tokio::select! {
-                // Always receive from all broadcast channels. Subscription state can change at any
-                // moment, and conditionally enabling branches can deadlock the producer waiting on
-                // an unrelated channel until new metadata arrives.
                 v = rx_video.recv() => v,
+                v = rx_video_lq.recv(), if current_quality == 1 => v,
+                v = rx_video_sq.recv(), if current_quality == 2 => v,
+                v = rx_video_hq.recv(), if current_quality >= 3 => v,
                 a = rx_audio.recv() => a,
                 m = rx_meta.recv() => m,
+                changed = rx_quality_changed.changed() => {
+                    if changed.is_ok() {
+                        current_quality = *rx_quality_changed.borrow();
+                    }
+                    continue;
+                }
             };
             let frame = match frame {
                 Ok(frame) => frame,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    lagged_count += skipped;
-                    eprintln!(
-                        "CONN {} DIAG: broadcast lagged, skipped {} frames",
-                        prod_conn_id, skipped
-                    );
-                    continue;
-                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
             let allowed = {
                 let st = prod_state.lock().await;
                 match frame.header.frame_type {
-                    // Match C# sender behavior: metadata is broadcast to all connected channels,
-                    // regardless of subscription flags.
                     OMTFrameType::Metadata => true,
                     OMTFrameType::Video => st.wants_video,
                     OMTFrameType::Audio => st.wants_audio,
@@ -296,27 +305,9 @@ async fn handle_connection(
                     let _ = tx_video_latest.send_replace(Some(frame));
                 }
                 OMTFrameType::Audio | OMTFrameType::Metadata => {
-                    if tx_other.try_send(frame).is_err() {
-                        audio_drop_count += 1;
-                        eprintln!(
-                            "CONN {} DIAG: tx_other full, dropped audio frame (total {})",
-                            prod_conn_id, audio_drop_count
-                        );
-                    }
+                    let _ = tx_other.try_send(frame);
                 }
                 _ => {}
-            }
-
-            if last_diag.elapsed().as_secs() >= 10 {
-                if lagged_count > 0 || audio_drop_count > 0 {
-                    eprintln!(
-                        "CONN {} DIAG 10s: lagged={}, audio_dropped={}",
-                        prod_conn_id, lagged_count, audio_drop_count
-                    );
-                }
-                lagged_count = 0;
-                audio_drop_count = 0;
-                last_diag = tokio::time::Instant::now();
             }
         }
     });
@@ -456,11 +447,14 @@ async fn handle_connection(
                 match result {
                     Ok(frame) => {
                         handle_subscription_frame(conn_id, &frame, &state).await;
-                        let wants_video = {
+                        let (wants_video, quality) = {
                             let st = state.lock().await;
-                            st.wants_video
+                            let q = st.suggested_quality.as_deref()
+                                .map(quality_level_from_name).unwrap_or(0);
+                            (st.wants_video, q)
                         };
                         let _ = tx_wants_video.send(wants_video);
+                        let _ = tx_quality_changed.send(quality);
                         sync_connection_suggested_quality(
                             conn_id,
                             &state,

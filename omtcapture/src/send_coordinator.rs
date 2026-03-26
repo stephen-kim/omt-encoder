@@ -86,6 +86,27 @@ impl SendCoordinator {
         }
         true
     }
+
+    /// Send a video frame to a quality-specific broadcast channel (LQ/SQ/HQ).
+    /// Falls back to the default video channel if quality is 0 or unknown.
+    #[allow(dead_code)]
+    pub fn send_video_quality(&self, frame: OMTFrame, quality: u8) {
+        let mut stamped = frame;
+        stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
+            0
+        } else {
+            crate::timebase::monotonic_100ns()
+        };
+        let result = match quality {
+            1 => self.inner.tx.video_lq.send(stamped),
+            2 => self.inner.tx.video_sq.send(stamped),
+            3.. => self.inner.tx.video_hq.send(stamped),
+            _ => self.inner.tx.video.send(stamped),
+        };
+        if result.unwrap_or(0) == 0 {
+            // no receivers at this quality level, fine
+        }
+    }
 }
 
 impl Drop for SendCoordinator {
