@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
     // Server on port 6400 (protocol port)
     let server = OMTServer::new(6400).await?;
     let suggested_quality_hint = server.suggested_quality_hint();
+    let active_quality_mask = server.active_quality_mask();
     server
         .set_sender_info_xml(Some(build_sender_info_xml(
             &shared_settings.read().await.video.name,
@@ -58,6 +59,7 @@ async fn main() -> Result<()> {
         initial_settings.preview.clone(),
         send.clone(),
         suggested_quality_hint.clone(),
+        active_quality_mask.clone(),
     );
     video.start();
 
@@ -124,6 +126,7 @@ async fn main() -> Result<()> {
                     new_settings.preview.clone(),
                     guard.send.clone(),
                     suggested_quality_hint.clone(),
+                    active_quality_mask.clone(),
                 );
                 guard.video.start();
             } else {

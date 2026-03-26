@@ -12,6 +12,7 @@ pub struct VideoPipeline {
     settings: Arc<tokio::sync::RwLock<VideoSettings>>,
     preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
     suggested_quality_hint: Arc<AtomicU8>,
+    active_quality_mask: Arc<AtomicU8>,
     running: Arc<std::sync::atomic::AtomicBool>,
     restart_requested: Arc<std::sync::atomic::AtomicBool>,
     preview_restart_requested: Arc<std::sync::atomic::AtomicBool>,
@@ -25,11 +26,13 @@ impl VideoPipeline {
         preview: PreviewSettings,
         send: SendCoordinator,
         suggested_quality_hint: Arc<AtomicU8>,
+        active_quality_mask: Arc<AtomicU8>,
     ) -> Self {
         VideoPipeline {
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
             preview: Arc::new(tokio::sync::RwLock::new(preview)),
             suggested_quality_hint,
+            active_quality_mask,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             preview_restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -44,6 +47,7 @@ impl VideoPipeline {
         let running = self.running.clone();
         let send = self.send.clone();
         let suggested_quality_hint = self.suggested_quality_hint.clone();
+        let active_quality_mask = self.active_quality_mask.clone();
 
         #[cfg(target_os = "linux")]
         let settings = self.settings.clone();
@@ -67,6 +71,7 @@ impl VideoPipeline {
                         preview.clone(),
                         send.clone(),
                         suggested_quality_hint.clone(),
+                        active_quality_mask.clone(),
                     );
                     if running.load(std::sync::atomic::Ordering::SeqCst) {
                         thread::sleep(Duration::from_millis(200));
@@ -175,6 +180,7 @@ mod linux {
         preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
         send: SendCoordinator,
         suggested_quality_hint: Arc<AtomicU8>,
+        active_quality_mask: Arc<AtomicU8>,
     ) {
         println!(
             "Starting Linux V4L2 pipeline on {}...",
@@ -649,7 +655,15 @@ mod linux {
             // Encode and send at each quality level for quality-specific channels.
             // Must happen BEFORE frame.data consumes payload via Bytes::copy_from_slice.
             if !quality_instances.is_empty() {
+                let mask = active_quality_mask.load(Ordering::Relaxed);
                 for qi in quality_instances.iter_mut() {
+                    // Skip quality levels with no active receivers
+                    let bit = match qi.level {
+                        1 => 1u8,  // LQ
+                        2 => 2u8,  // SQ
+                        _ => 4u8,  // HQ
+                    };
+                    if mask & bit == 0 { continue; }
                     let err = unsafe {
                         vmx_encode_frame(
                             qi.inst,

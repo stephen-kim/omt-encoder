@@ -26,6 +26,7 @@ pub struct OMTServer {
     tx: ServerSenders,
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
+    active_quality_mask: Arc<AtomicU8>,
 }
 
 impl OMTServer {
@@ -55,6 +56,7 @@ impl OMTServer {
             },
             metadata_state: Arc::new(Mutex::new(ServerMetadataState::default())),
             suggested_quality_hint: Arc::new(AtomicU8::new(0)),
+            active_quality_mask: Arc::new(AtomicU8::new(0)),
         })
     }
 
@@ -64,6 +66,12 @@ impl OMTServer {
 
     pub fn suggested_quality_hint(&self) -> Arc<AtomicU8> {
         self.suggested_quality_hint.clone()
+    }
+
+    /// Bitmask of quality levels with active receivers: bit0=LQ, bit1=SQ, bit2=HQ.
+    /// SQ (bit1) is always set when any video receiver is connected.
+    pub fn active_quality_mask(&self) -> Arc<AtomicU8> {
+        self.active_quality_mask.clone()
     }
 
     pub async fn set_sender_info_xml(&self, xml: Option<String>) {
@@ -116,12 +124,13 @@ impl OMTServer {
             let tx = self.tx.clone();
             let metadata_state = Arc::clone(&self.metadata_state);
             let quality_hint = Arc::clone(&self.suggested_quality_hint);
+            let quality_mask = Arc::clone(&self.active_quality_mask);
             let this_conn_id = conn_id;
             conn_id = conn_id.wrapping_add(1);
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, tx, metadata_state, quality_hint, this_conn_id).await
+                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, this_conn_id).await
                 {
                     eprintln!("Connection error: {}", e);
                 }
@@ -196,6 +205,7 @@ async fn handle_connection(
     tx: ServerSenders,
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
+    active_quality_mask: Arc<AtomicU8>,
     conn_id: u64,
 ) -> Result<(), io::Error> {
     let _ = socket.set_nodelay(false);
@@ -247,7 +257,7 @@ async fn handle_connection(
         let mut st = metadata_state.lock().await;
         st.per_connection_suggested_quality.insert(conn_id, 0);
     }
-    update_global_suggested_quality(&metadata_state, &suggested_quality_hint).await;
+    update_global_suggested_quality(&metadata_state, &suggested_quality_hint, &active_quality_mask).await;
 
     // Low-latency send model (matches C# sender behavior):
     // - Video is "latest-wins" (no queueing): if the connection can't keep up, we prefer the newest
@@ -459,6 +469,7 @@ async fn handle_connection(
                             &state,
                             &metadata_state,
                             &suggested_quality_hint,
+                            &active_quality_mask,
                         )
                         .await;
                     }
@@ -477,7 +488,7 @@ async fn handle_connection(
     let _ = producer.await;
     let _ = send_task.await;
 
-    remove_connection_suggested_quality(conn_id, &metadata_state, &suggested_quality_hint).await;
+    remove_connection_suggested_quality(conn_id, &metadata_state, &suggested_quality_hint, &active_quality_mask).await;
     if let Some(e) = terminal_error {
         return Err(e);
     }
@@ -714,6 +725,7 @@ async fn sync_connection_suggested_quality(
     state: &Arc<Mutex<SubscriptionState>>,
     metadata_state: &Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: &Arc<AtomicU8>,
+    active_quality_mask: &Arc<AtomicU8>,
 ) {
     let quality = {
         let st = state.lock().await;
@@ -730,34 +742,49 @@ async fn sync_connection_suggested_quality(
         let mut st = metadata_state.lock().await;
         st.per_connection_suggested_quality.insert(conn_id, quality);
     }
-    update_global_suggested_quality(metadata_state, suggested_quality_hint).await;
+    update_global_suggested_quality(metadata_state, suggested_quality_hint, &active_quality_mask).await;
 }
 
 async fn remove_connection_suggested_quality(
     conn_id: u64,
     metadata_state: &Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: &Arc<AtomicU8>,
+    active_quality_mask: &Arc<AtomicU8>,
 ) {
     {
         let mut st = metadata_state.lock().await;
         st.per_connection_suggested_quality.remove(&conn_id);
     }
-    update_global_suggested_quality(metadata_state, suggested_quality_hint).await;
+    update_global_suggested_quality(metadata_state, suggested_quality_hint, &active_quality_mask).await;
 }
 
 async fn update_global_suggested_quality(
     metadata_state: &Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: &Arc<AtomicU8>,
+    active_quality_mask: &Arc<AtomicU8>,
 ) {
-    let max_quality = {
+    let (max_quality, mask) = {
         let st = metadata_state.lock().await;
-        st.per_connection_suggested_quality
+        let max = st.per_connection_suggested_quality
             .values()
             .copied()
             .max()
-            .unwrap_or(0)
+            .unwrap_or(0);
+        let mut m: u8 = 0;
+        for &q in st.per_connection_suggested_quality.values() {
+            match q {
+                1 => m |= 1,      // LQ = bit 0
+                2 => m |= 2,      // SQ = bit 1
+                3.. => m |= 4,    // HQ = bit 2
+                _ => m |= 2,      // default = SQ
+            }
+        }
+        // Always include SQ if any video receiver exists
+        if m != 0 { m |= 2; }
+        (max, m)
     };
     suggested_quality_hint.store(max_quality, Ordering::Relaxed);
+    active_quality_mask.store(mask, Ordering::Relaxed);
 }
 
 fn parse_xml_tag_and_attrs(
