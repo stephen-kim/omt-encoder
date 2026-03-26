@@ -286,7 +286,7 @@ async fn get_fb_info(Query(query): Query<FbQuery>) -> impl IntoResponse {
     if fb.starts_with("fb") {
         let base_path = format!("/sys/class/graphics/{}", fb);
         if let Ok(n) = fs::read_to_string(format!("{}/name", base_path)) {
-            name = n.trim().to_string();
+            name = friendly_fb_name(n.trim());
         }
         if let Ok(size) = fs::read_to_string(format!("{}/virtual_size", base_path)) {
             let parts: Vec<&str> = size.trim().split(',').collect();
@@ -311,7 +311,7 @@ async fn get_fb_name(Query(query): Query<FbQuery>) -> impl IntoResponse {
     if fb.starts_with("fb") {
         let name_path = format!("/sys/class/graphics/{}/name", fb);
         if let Ok(n) = fs::read_to_string(name_path) {
-            name = n.trim().to_string();
+            name = friendly_fb_name(n.trim());
         }
     }
 
@@ -328,6 +328,26 @@ fn run_command(cmd: &str, args: &[&str]) -> String {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(e) => format!("{} failed: {}", cmd, e),
     }
+}
+
+fn friendly_fb_name(driver: &str) -> String {
+    let lower = driver.to_lowercase();
+    // HDMI outputs
+    if lower.contains("drm") || lower.contains("hdmi") {
+        return format!("HDMI ({})", driver);
+    }
+    // SPI LCD panels
+    if lower.contains("ili9341") { return "SPI LCD (ILI9341 320x240)".to_string(); }
+    if lower.contains("ili9486") { return "SPI LCD (ILI9486 480x320)".to_string(); }
+    if lower.contains("ili9488") { return "SPI LCD (ILI9488 480x320)".to_string(); }
+    if lower.contains("st7789") { return "SPI LCD (ST7789 240x240)".to_string(); }
+    if lower.contains("st7735") { return "SPI LCD (ST7735 160x128)".to_string(); }
+    if lower.contains("ssd1306") { return "OLED (SSD1306)".to_string(); }
+    if lower.contains("hx8357") { return "SPI LCD (HX8357 480x320)".to_string(); }
+    // DSI displays
+    if lower.contains("dsi") { return format!("DSI Display ({})", driver); }
+    // Fallback
+    driver.to_string()
 }
 
 fn list_devices(dir: &str, prefix: &str) -> Vec<String> {
