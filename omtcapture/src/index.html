@@ -593,19 +593,24 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title" data-i18n="audioInput">Audio Input</div>
-      <div class="section-label" data-i18n="captureSources">Capture sources</div>
-      <div id="audioInputDevices" class="check-grid"></div>
-      <div class="help" data-i18n="captureHelp">Select up to two inputs to mix. Leave empty for silent.</div>
+    <div style="display:flex;flex-direction:column;gap:20px;">
+      <div class="card">
+        <div class="card-title" data-i18n="audioInput">Audio Input</div>
+        <div class="section-label" data-i18n="captureSources">Capture sources</div>
+        <div id="audioInputDevices" class="check-grid"></div>
+        <div class="help" data-i18n="captureHelp">Select up to two inputs to mix. Leave empty for silent.</div>
 
-      <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
-      <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
-      <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
+        <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
+        <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
+        <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
+      </div>
 
-      <label data-i18n="webPort">Web port</label>
-      <input id="webPort" type="number" />
-      <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
+      <div class="card">
+        <div class="card-title" data-i18n="webService">Web Service</div>
+        <label data-i18n="webPort">Web port</label>
+        <input id="webPort" type="number" />
+        <div class="help" data-i18n="webPortHelp">Requires service restart to apply.</div>
+      </div>
     </div>
   </section>
 
