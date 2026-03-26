@@ -740,22 +740,21 @@ async function buildFramebufferOptions(framebuffers) {
   const options = [];
   for (const fb of framebuffers) {
     let label = fb;
+    let isHdmi = false;
     try {
       const nameRes = await fetch(`/api/fbinfo?path=${encodeURIComponent(fb)}`);
       if (nameRes.ok) {
         const data = await nameRes.json();
         if (data && data.name) {
           const res = (data.width && data.height) ? ` ${data.width}x${data.height}` : '';
-          label = `${fb} — ${data.name}${res}`;
-        }
-        if (data && data.width && data.height) {
-          label = `${label} ${data.width}x${data.height}`;
+          label = `${data.name}${res}`;
+          isHdmi = data.name.toLowerCase().includes('hdmi');
         }
       }
     } catch (e) {
       // ignore
     }
-    options.push({ value: fb, label });
+    options.push({ value: fb, label, isHdmi });
   }
   return options;
 }
@@ -911,12 +910,12 @@ async function loadDevices(showToast) {
     fps.type = 'number';
     fps.className = 'preview-out-fps';
     fps.placeholder = 'FPS';
-    fps.value = cfg ? cfg.fps : 10;
+    fps.value = cfg ? cfg.fps : (opt.isHdmi ? 0 : 10);
     fps.style.cssText = 'width:70px;padding:6px 8px;margin:0;';
     const fmt = document.createElement('input');
     fmt.className = 'preview-out-fmt';
     fmt.placeholder = 'format';
-    fmt.value = cfg ? cfg.pixel_format : 'rgb565le';
+    fmt.value = cfg ? cfg.pixel_format : (opt.isHdmi ? 'bgra' : 'rgb565le');
     fmt.style.cssText = 'width:100px;padding:6px 8px;margin:0;';
     row.appendChild(cb);
     row.appendChild(lbl);
