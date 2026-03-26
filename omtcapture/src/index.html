@@ -597,8 +597,8 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       </div>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:20px;">
-      <div class="card">
+    <div style="display:flex;flex-direction:column;gap:20px;min-height:0;">
+      <div class="card" style="flex:1;">
         <div class="card-title" data-i18n="audioInput">Audio Input</div>
         <div class="section-label" data-i18n="captureSources">Capture sources</div>
         <div id="audioInputDevices" class="check-grid"></div>
