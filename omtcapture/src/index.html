@@ -912,10 +912,16 @@ async function loadDevices(showToast) {
     fps.placeholder = 'FPS';
     fps.value = cfg ? cfg.fps : (opt.isHdmi ? 0 : 10);
     fps.style.cssText = 'width:70px;padding:6px 8px;margin:0;';
-    const fmt = document.createElement('input');
+    const fmt = document.createElement('select');
     fmt.className = 'preview-out-fmt';
-    fmt.placeholder = 'format';
-    fmt.value = cfg ? cfg.pixel_format : (opt.isHdmi ? 'bgra' : 'rgb565le');
+    const defaultFmt = cfg ? cfg.pixel_format : (opt.isHdmi ? 'bgra' : 'rgb565le');
+    ['rgb565le', 'bgra', 'nv12', 'yuyv422', 'uyvy422'].forEach(f => {
+      const o = document.createElement('option');
+      o.value = f;
+      o.textContent = f;
+      if (f === defaultFmt) o.selected = true;
+      fmt.appendChild(o);
+    });
     fmt.style.cssText = 'width:100px;padding:6px 8px;margin:0;';
     row.appendChild(cb);
     row.appendChild(lbl);
