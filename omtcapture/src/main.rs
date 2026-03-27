@@ -62,6 +62,7 @@ async fn main() -> Result<()> {
     let initial_settings = shared_settings.read().await.clone();
     let send = SendCoordinator::new(tx.clone(), initial_settings.send.clone());
     let mut audio = AudioPipeline::new(initial_settings.audio.clone(), tx.audio.clone());
+    let audio_levels = audio.levels.clone();
     audio.start();
     let mut video = VideoPipeline::new(
         initial_settings.video.clone(),
@@ -91,12 +92,23 @@ async fn main() -> Result<()> {
     // Start Web Server
     let web_settings = shared_settings.read().await.web.clone();
     if web_settings.enabled {
+        let preview_frame: Arc<tokio::sync::Mutex<Option<bytes::Bytes>>> =
+            Arc::new(tokio::sync::Mutex::new(None));
         let web_state = WebState {
             settings: shared_settings.clone(),
             settings_tx: settings_tx.clone(),
             config_path: config_path.to_string(),
             server: Some(Arc::clone(&server)),
+            audio_levels: Some(audio_levels.clone()),
+            preview_frame: preview_frame.clone(),
         };
+
+        // Background: generate preview JPEG snapshots from framebuffer
+        let pf = preview_frame.clone();
+        let preview_settings = shared_settings.read().await.preview.clone();
+        tokio::spawn(async move {
+            generate_preview_loop(pf, preview_settings).await;
+        });
 
         tokio::spawn(async move {
             if let Err(e) = start_web_server(web_settings.port, web_state).await {
@@ -308,6 +320,91 @@ fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
         || old.preview.height != new.preview.height
         || old.preview.fps != new.preview.fps
         || old.preview.pixel_format != new.preview.pixel_format
+}
+
+async fn generate_preview_loop(
+    frame: Arc<tokio::sync::Mutex<Option<bytes::Bytes>>>,
+    preview: settings::PreviewSettings,
+) {
+    use std::process::Command;
+
+    // Find the primary framebuffer from preview outputs
+    let fb_device = preview
+        .outputs
+        .first()
+        .map(|o| o.device.clone())
+        .or_else(|| {
+            if !preview.output_devices.is_empty() {
+                Some(preview.output_devices[0].clone())
+            } else {
+                Some(preview.output_device.clone())
+            }
+        })
+        .unwrap_or_default();
+
+    if fb_device.is_empty() || !std::path::Path::new(&fb_device).exists() {
+        println!("Preview snapshot: no framebuffer available");
+        return;
+    }
+
+    // Read framebuffer size
+    let fb_name = fb_device.split('/').last().unwrap_or("fb0");
+    let size_path = format!("/sys/class/graphics/{}/virtual_size", fb_name);
+    let (width, height) = if let Ok(size) = std::fs::read_to_string(&size_path) {
+        let parts: Vec<&str> = size.trim().split(',').collect();
+        if parts.len() == 2 {
+            (
+                parts[0].parse::<u32>().unwrap_or(0),
+                parts[1].parse::<u32>().unwrap_or(0),
+            )
+        } else {
+            (0, 0)
+        }
+    } else {
+        (0, 0)
+    };
+
+    if width == 0 || height == 0 {
+        println!("Preview snapshot: can't read framebuffer size");
+        return;
+    }
+
+    let pix_fmt = preview
+        .outputs
+        .first()
+        .map(|o| o.pixel_format.clone())
+        .unwrap_or_else(|| preview.pixel_format.clone());
+    let pix_fmt = if pix_fmt.is_empty() { "rgb565le".to_string() } else { pix_fmt };
+
+    println!(
+        "Preview snapshot: {} {}x{} {}",
+        fb_device, width, height, pix_fmt
+    );
+
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        let result = Command::new("ffmpeg")
+            .args([
+                "-loglevel", "error",
+                "-f", "rawvideo",
+                "-pix_fmt", &pix_fmt,
+                "-s", &format!("{}x{}", width, height),
+                "-i", &fb_device,
+                "-frames:v", "1",
+                "-f", "image2",
+                "-vcodec", "mjpeg",
+                "-q:v", "8",
+                "pipe:1",
+            ])
+            .output();
+
+        if let Ok(output) = result {
+            if output.status.success() && !output.stdout.is_empty() {
+                *frame.lock().await = Some(bytes::Bytes::from(output.stdout));
+            }
+        }
+    }
 }
 
 fn detect_supported_codecs() -> u8 {

@@ -52,6 +52,8 @@ pub struct WebState {
     pub settings_tx: watch::Sender<Settings>,
     pub config_path: String,
     pub server: Option<Arc<libomtnet::server::OMTServer>>,
+    pub audio_levels: Option<crate::audio_pipeline::AudioLevels>,
+    pub preview_frame: Arc<tokio::sync::Mutex<Option<bytes::Bytes>>>,
 }
 
 pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
@@ -63,6 +65,7 @@ pub async fn start_web_server(port: u16, state: WebState) -> Result<()> {
         .route("/api/fbinfo", get(get_fb_info))
         .route("/api/status", get(get_status))
         .route("/api/stats", get(get_stats))
+        .route("/api/snapshot", get(get_snapshot))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -342,13 +345,40 @@ async fn get_stats(State(state): State<WebState>) -> impl IntoResponse {
     } else {
         "VMX1".to_string()
     };
+    let (audio_l, audio_r) = if let Some(ref lvl) = state.audio_levels {
+        (
+            lvl.peak_l.load(std::sync::atomic::Ordering::Relaxed) as f64 / 100.0,
+            lvl.peak_r.load(std::sync::atomic::Ordering::Relaxed) as f64 / 100.0,
+        )
+    } else {
+        (-100.0, -100.0)
+    };
     Json(serde_json::json!({
         "cpu": cpu,
         "mem": mem,
         "connections": connections,
         "videoFormat": video_format,
         "codecs": codecs,
+        "audioLevelL": audio_l,
+        "audioLevelR": audio_r,
     }))
+}
+
+async fn get_snapshot(State(state): State<WebState>) -> impl IntoResponse {
+    let frame = state.preview_frame.lock().await;
+    if let Some(ref jpeg) = *frame {
+        (
+            axum::http::StatusCode::OK,
+            [("content-type", "image/jpeg"), ("cache-control", "no-store")],
+            jpeg.to_vec(),
+        )
+    } else {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [("content-type", "text/plain"), ("cache-control", "no-store")],
+            b"No preview available".to_vec(),
+        )
+    }
 }
 
 fn get_cpu_usage() -> String {

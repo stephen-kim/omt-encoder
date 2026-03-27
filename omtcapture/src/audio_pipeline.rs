@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -6,11 +7,29 @@ use crate::settings::AudioSettings;
 use libomtnet::OMTFrame;
 use tokio::sync::broadcast;
 
+/// Shared audio peak levels (updated every frame, read by web API).
+/// Values are in millibels (dB * 100) for atomic integer storage.
+#[derive(Clone)]
+pub struct AudioLevels {
+    pub peak_l: Arc<AtomicI32>,
+    pub peak_r: Arc<AtomicI32>,
+}
+
+impl AudioLevels {
+    pub fn new() -> Self {
+        Self {
+            peak_l: Arc::new(AtomicI32::new(-10000)),
+            peak_r: Arc::new(AtomicI32::new(-10000)),
+        }
+    }
+}
+
 pub struct AudioPipeline {
     settings: AudioSettings,
     audio_tx: broadcast::Sender<OMTFrame>,
     running: Arc<std::sync::atomic::AtomicBool>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
+    pub levels: AudioLevels,
 }
 
 impl AudioPipeline {
@@ -20,6 +39,7 @@ impl AudioPipeline {
             audio_tx,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             thread_handle: None,
+            levels: AudioLevels::new(),
         }
     }
 
@@ -34,6 +54,7 @@ impl AudioPipeline {
         let running = self.running.clone();
         let settings = self.settings.clone();
         let audio_tx = self.audio_tx.clone();
+        let levels = self.levels.clone();
 
         self.thread_handle = Some(thread::spawn(move || {
             // Set real-time scheduling for the audio thread to prevent glitches
@@ -48,10 +69,10 @@ impl AudioPipeline {
             }
 
             #[cfg(target_os = "linux")]
-            linux::run_audio_loop(running, settings, audio_tx);
+            linux::run_audio_loop(running, settings, audio_tx, levels);
 
             #[cfg(not(target_os = "linux"))]
-            stub::run_audio_loop(running, settings, audio_tx);
+            stub::run_audio_loop(running, settings, audio_tx, levels);
         }));
     }
 
@@ -71,6 +92,7 @@ mod stub {
         running: Arc<std::sync::atomic::AtomicBool>,
         _settings: AudioSettings,
         _audio_tx: broadcast::Sender<OMTFrame>,
+        _levels: AudioLevels,
     ) {
         println!("Available on Linux only. Stubbing audio loop for macOS.");
         while running.load(std::sync::atomic::Ordering::SeqCst) {
@@ -142,6 +164,7 @@ mod linux {
         running: Arc<std::sync::atomic::AtomicBool>,
         settings: AudioSettings,
         audio_tx: broadcast::Sender<OMTFrame>,
+        levels: AudioLevels,
     ) {
         println!("Starting Linux ALSA pipeline...");
         let mode = settings.mode.trim().to_lowercase();
@@ -495,6 +518,19 @@ mod linux {
                     );
                 }
                 consecutive_silence = 0;
+            }
+
+            // Update audio peak levels for web UI meter
+            {
+                let mut pl = 0.0f32;
+                let mut pr = 0.0f32;
+                for i in 0..frame_size {
+                    pl = pl.max(mix_buf[i * 2].abs());
+                    pr = pr.max(mix_buf[i * 2 + 1].abs());
+                }
+                let to_mdb = |v: f32| ((20.0 * (v.max(1e-10) as f64).log10()) * 100.0) as i32;
+                levels.peak_l.store(to_mdb(pl), Ordering::Relaxed);
+                levels.peak_r.store(to_mdb(pr), Ordering::Relaxed);
             }
 
             let send_start = Instant::now();

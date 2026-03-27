@@ -545,6 +545,26 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
   </div>
 
+  <div class="card" style="display:flex;gap:16px;align-items:stretch;">
+    <div style="flex:1;min-width:0;">
+      <img id="previewImg" src="/api/snapshot" style="width:100%;border-radius:8px;background:#000;aspect-ratio:16/9;object-fit:contain;" alt="Preview" />
+    </div>
+    <div style="display:flex;gap:6px;align-items:flex-end;padding:4px 0;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <div id="meterL" style="width:12px;height:100%;min-height:80px;background:#1a1f2a;border-radius:4px;position:relative;overflow:hidden;">
+          <div id="meterLBar" style="position:absolute;bottom:0;width:100%;background:var(--accent-3);border-radius:4px;transition:height 150ms;height:0;"></div>
+        </div>
+        <span style="font-size:10px;color:var(--muted);">L</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <div id="meterR" style="width:12px;height:100%;min-height:80px;background:#1a1f2a;border-radius:4px;position:relative;overflow:hidden;">
+          <div id="meterRBar" style="position:absolute;bottom:0;width:100%;background:var(--accent-3);border-radius:4px;transition:height 150ms;height:0;"></div>
+        </div>
+        <span style="font-size:10px;color:var(--muted);">R</span>
+      </div>
+    </div>
+  </div>
+
   <section class="grid two">
     <div class="card">
       <div class="card-title" data-i18n="videoInput">Video Input</div>
@@ -1127,6 +1147,18 @@ async function refreshStats() {
     document.getElementById('statMem').textContent = s.mem || '—';
     document.getElementById('statVideo').textContent = s.videoFormat || '—';
     document.getElementById('statCodecs').textContent = s.codecs || '—';
+    // Audio meters (dB to percentage: 0dB=100%, -60dB=0%)
+    const dbToPercent = db => Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+    const lPct = dbToPercent(s.audioLevelL || -100);
+    const rPct = dbToPercent(s.audioLevelR || -100);
+    document.getElementById('meterLBar').style.height = lPct + '%';
+    document.getElementById('meterRBar').style.height = rPct + '%';
+    // Color: green → yellow → red
+    const meterColor = pct => pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--accent)' : 'var(--accent-3)';
+    document.getElementById('meterLBar').style.background = meterColor(lPct);
+    document.getElementById('meterRBar').style.background = meterColor(rPct);
+    // Refresh preview image
+    document.getElementById('previewImg').src = '/api/snapshot?' + Date.now();
     const conns = s.connections || [];
     const byAddr = {};
     conns.forEach(c => {
