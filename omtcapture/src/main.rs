@@ -313,29 +313,52 @@ fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
 fn detect_supported_codecs() -> u8 {
     let mut mask: u8 = 1; // VMX1 always
 
-    // Check ffmpeg for HW encoders
-    if let Ok(output) = std::process::Command::new("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output()
-    {
-        let text = String::from_utf8_lossy(&output.stdout);
+    // Test each HW encoder by actually trying to encode a tiny frame
+    let h264_encoders = ["h264_rkmpp", "h264_nvenc", "h264_qsv", "h264_vaapi", "h264_v4l2m2m"];
+    let h265_encoders = ["hevc_rkmpp", "hevc_nvenc", "hevc_qsv", "hevc_vaapi", "hevc_v4l2m2m"];
 
-        // H.264 HW encoders only (no libx264 software fallback)
-        for enc in ["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "h264_nvenc", "h264_qsv"] {
-            if text.contains(enc) {
-                mask |= 2;
-                break;
-            }
+    for enc in h264_encoders {
+        if test_hw_encoder(enc) {
+            println!("H.264 HW encoder available: {}", enc);
+            mask |= 2;
+            break;
         }
+    }
 
-        // H.265 HW encoders only (no libx265 software fallback)
-        for enc in ["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "hevc_nvenc", "hevc_qsv"] {
-            if text.contains(enc) {
-                mask |= 4;
-                break;
-            }
+    for enc in h265_encoders {
+        if test_hw_encoder(enc) {
+            println!("H.265 HW encoder available: {}", enc);
+            mask |= 4;
+            break;
         }
     }
 
     mask
+}
+
+fn test_hw_encoder(encoder: &str) -> bool {
+    // Try encoding a single 16x16 black frame to verify the encoder actually works
+    use std::io::Write;
+    let mut child = match std::process::Command::new("ffmpeg")
+        .args([
+            "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", "16x16", "-r", "1",
+            "-i", "pipe:0",
+            "-c:v", encoder, "-frames:v", "1",
+            "-f", "null", "-",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Feed one 16x16 YUV420 frame (16*16*3/2 = 384 bytes)
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = stdin.write_all(&[0u8; 384]);
+    }
+    drop(child.stdin.take());
+    matches!(child.wait(), Ok(status) if status.success())
 }
