@@ -43,6 +43,14 @@ async fn main() -> Result<()> {
     let suggested_quality_hint = server.suggested_quality_hint();
     let active_quality_mask = server.active_quality_mask();
     let active_codec_mask = server.active_codec_mask();
+
+    // Detect supported codecs (VMX1 always, H264/H265 if HW encoder available)
+    let supported = detect_supported_codecs();
+    server.set_supported_codecs(supported);
+    println!("Supported codecs: VMX1{}{}",
+        if supported & 2 != 0 { " H264" } else { "" },
+        if supported & 4 != 0 { " H265" } else { "" });
+
     server
         .set_sender_info_xml(Some(build_sender_info_xml(
             &shared_settings.read().await.video.name,
@@ -300,4 +308,34 @@ fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
         || old.preview.height != new.preview.height
         || old.preview.fps != new.preview.fps
         || old.preview.pixel_format != new.preview.pixel_format
+}
+
+fn detect_supported_codecs() -> u8 {
+    let mut mask: u8 = 1; // VMX1 always
+
+    // Check ffmpeg for HW encoders
+    if let Ok(output) = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+
+        // H.264 HW encoders
+        for enc in ["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "h264_nvenc", "h264_qsv"] {
+            if text.contains(enc) {
+                mask |= 2;
+                break;
+            }
+        }
+
+        // H.265 HW encoders
+        for enc in ["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "hevc_nvenc", "hevc_qsv"] {
+            if text.contains(enc) {
+                mask |= 4;
+                break;
+            }
+        }
+    }
+
+    mask
 }

@@ -31,6 +31,8 @@ pub struct OMTServer {
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
     active_codec_mask: Arc<AtomicU8>,
+    /// Bitmask of codecs the encoder can actually produce: bit0=VMX1, bit1=H264, bit2=H265
+    supported_codec_mask: Arc<AtomicU8>,
 }
 
 impl OMTServer {
@@ -65,7 +67,8 @@ impl OMTServer {
             metadata_state: Arc::new(Mutex::new(ServerMetadataState::default())),
             suggested_quality_hint: Arc::new(AtomicU8::new(0)),
             active_quality_mask: Arc::new(AtomicU8::new(0)),
-            active_codec_mask: Arc::new(AtomicU8::new(1)), // VMX1 always
+            active_codec_mask: Arc::new(AtomicU8::new(1)),
+            supported_codec_mask: Arc::new(AtomicU8::new(1)), // VMX1 always; updated at startup
         })
     }
 
@@ -86,6 +89,15 @@ impl OMTServer {
     /// Bitmask of codecs with active receivers: bit0=VMX1, bit1=H264, bit2=H265
     pub fn active_codec_mask(&self) -> Arc<AtomicU8> {
         self.active_codec_mask.clone()
+    }
+
+    pub fn supported_codec_mask(&self) -> Arc<AtomicU8> {
+        self.supported_codec_mask.clone()
+    }
+
+    /// Set which codecs the encoder can produce. Called at startup after detecting HW encoders.
+    pub fn set_supported_codecs(&self, mask: u8) {
+        self.supported_codec_mask.store(mask, Ordering::Relaxed);
     }
 
     pub async fn get_conn_info(&self) -> Vec<ConnInfo> {
@@ -149,13 +161,14 @@ impl OMTServer {
             let quality_hint = Arc::clone(&self.suggested_quality_hint);
             let quality_mask = Arc::clone(&self.active_quality_mask);
             let codec_mask = Arc::clone(&self.active_codec_mask);
+            let supported_codecs = Arc::clone(&self.supported_codec_mask);
             let this_conn_id = conn_id;
             let peer_addr = addr.ip().to_string();
             conn_id = conn_id.wrapping_add(1);
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, codec_mask, this_conn_id, peer_addr).await
+                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, codec_mask, supported_codecs, this_conn_id, peer_addr).await
                 {
                     eprintln!("Connection error: {}", e);
                 }
@@ -244,6 +257,7 @@ async fn handle_connection(
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
     active_codec_mask: Arc<AtomicU8>,
+    supported_codec_mask: Arc<AtomicU8>,
     conn_id: u64,
     peer_addr: String,
 ) -> Result<(), io::Error> {
@@ -521,9 +535,9 @@ async fn handle_connection(
                             let q = st.suggested_quality.as_deref()
                                 .map(quality_level_from_name).unwrap_or(0);
                             let qn = st.suggested_quality.clone().unwrap_or_else(|| "Default".to_string());
-                            // Negotiate codec: pick first client-preferred that we support
-                            // For now, use all bits as supported; video pipeline will filter by active_codec_mask
-                            let neg = negotiate_codec(&st.preferred_codecs, 0xFF);
+                            // Negotiate codec: pick first client-preferred that we actually support
+                            let sup = supported_codec_mask.load(Ordering::Relaxed);
+                            let neg = negotiate_codec(&st.preferred_codecs, sup);
                             let cid: u8 = match neg.as_str() { "h264" => 1, "h265" => 2, _ => 0 };
                             let cn = neg.to_uppercase();
                             (st.wants_video, st.wants_audio, q, qn, cid, cn)
