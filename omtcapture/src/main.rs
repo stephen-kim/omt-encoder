@@ -351,7 +351,6 @@ async fn generate_preview_loop(
                     "-s", &format!("{}x{}", width, height),
                     "-i", "pipe:0",
                     "-frames:v", "1",
-                    "-vf", "scale=640:-2",
                     "-f", "image2",
                     "-vcodec", "mjpeg",
                     "-q:v", "8",
