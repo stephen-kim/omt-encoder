@@ -13,6 +13,7 @@ pub struct VideoPipeline {
     preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
+    active_codec_mask: Arc<AtomicU8>,
     running: Arc<std::sync::atomic::AtomicBool>,
     restart_requested: Arc<std::sync::atomic::AtomicBool>,
     preview_restart_requested: Arc<std::sync::atomic::AtomicBool>,
@@ -27,12 +28,14 @@ impl VideoPipeline {
         send: SendCoordinator,
         suggested_quality_hint: Arc<AtomicU8>,
         active_quality_mask: Arc<AtomicU8>,
+        active_codec_mask: Arc<AtomicU8>,
     ) -> Self {
         VideoPipeline {
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
             preview: Arc::new(tokio::sync::RwLock::new(preview)),
             suggested_quality_hint,
             active_quality_mask,
+            active_codec_mask,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             preview_restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -48,6 +51,7 @@ impl VideoPipeline {
         let send = self.send.clone();
         let suggested_quality_hint = self.suggested_quality_hint.clone();
         let active_quality_mask = self.active_quality_mask.clone();
+        let active_codec_mask = self.active_codec_mask.clone();
 
         #[cfg(target_os = "linux")]
         let settings = self.settings.clone();
@@ -72,6 +76,7 @@ impl VideoPipeline {
                         send.clone(),
                         suggested_quality_hint.clone(),
                         active_quality_mask.clone(),
+                        active_codec_mask.clone(),
                     );
                     if running.load(std::sync::atomic::Ordering::SeqCst) {
                         thread::sleep(Duration::from_millis(200));
@@ -347,6 +352,7 @@ mod linux {
         send: SendCoordinator,
         suggested_quality_hint: Arc<AtomicU8>,
         active_quality_mask: Arc<AtomicU8>,
+        active_codec_mask: Arc<AtomicU8>,
     ) {
         println!(
             "Starting Linux V4L2 pipeline on {}...",
@@ -625,31 +631,10 @@ mod linux {
             );
         }
 
-        // HW encoder (H.264/H.265 all-intra) — used instead of VMX when configured.
-        let use_hw_encoder = settings.encoder == "h264" || settings.encoder == "h265";
-        let mut hw_encoder: Option<HwEncoderContext> = if use_hw_encoder {
-            let input_pix_fmt = codec_to_pix_fmt(encode_codec);
-            match HwEncoderContext::start(
-                input_pix_fmt,
-                encode_width,
-                encode_height,
-                effective_output_rate_n,
-                effective_output_rate_d,
-                &settings.hw_encoder,
-                &settings.encoder,
-            ) {
-                Ok(ctx) => {
-                    println!("HW encoder started: {} ({})", settings.encoder, settings.hw_encoder);
-                    Some(ctx)
-                }
-                Err(e) => {
-                    eprintln!("HW encoder failed: {}. Falling back to VMX1.", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        // HW encoders (H.264/H.265 all-intra) — created on demand when clients request them.
+        let mut hw_h264: Option<HwEncoderContext> = None;
+        let mut hw_h265: Option<HwEncoderContext> = None;
+        let input_pix_fmt_str = codec_to_pix_fmt(encode_codec).to_string();
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
@@ -748,27 +733,10 @@ mod linux {
                 };
 
             let raw_payload = payload.clone();
+            let codec_mask = active_codec_mask.load(Ordering::Relaxed);
 
-            // HW encoder path (H.264/H.265 all-intra)
-            let network_frame = if let Some(ref mut hw_enc) = hw_encoder {
-                use std::io::Write;
-                if hw_enc.stdin.write_all(&payload).is_ok() {
-                    if let Some(compressed) = hw_enc.read_frame() {
-                        Some((
-                            Bytes::from(compressed),
-                            hw_enc.codec,
-                            None::<i32>,
-                            0u32,
-                        ))
-                    } else {
-                        eprintln!("HW encoder read failed");
-                        None
-                    }
-                } else {
-                    eprintln!("HW encoder write failed");
-                    None
-                }
-            } else if let (Some(inst), Some(_fmt)) =
+            // VMX1 encoding
+            let network_frame = if let (Some(inst), Some(_fmt)) =
                 (vmx_instance, codec_to_vmx_image_format(frame_codec))
             {
                 let err = unsafe {
@@ -916,6 +884,76 @@ mod linux {
                         }
                     }
                 }
+            }
+
+            // H.264 encoding (demand-driven, gated on codec_mask bit 1)
+            if codec_mask & 2 != 0 {
+                use std::io::Write;
+                if hw_h264.is_none() {
+                    match HwEncoderContext::start(
+                        &input_pix_fmt_str, encode_width, encode_height,
+                        effective_output_rate_n, effective_output_rate_d,
+                        &settings.hw_encoder, "h264",
+                    ) {
+                        Ok(ctx) => { println!("H.264 HW encoder started"); hw_h264 = Some(ctx); }
+                        Err(e) => eprintln!("H.264 encoder failed: {}", e),
+                    }
+                }
+                if let Some(ref mut enc) = hw_h264 {
+                    if enc.stdin.write_all(&raw_payload).is_ok() {
+                        if let Some(compressed) = enc.read_frame() {
+                            let mut f = OMTFrame::new(OMTFrameType::Video);
+                            f.video_header = Some(OMTVideoHeader {
+                                codec: OMTCodec::H264 as i32,
+                                width: frame_width as i32, height: frame_height as i32,
+                                frame_rate_n: effective_output_rate_n as i32,
+                                frame_rate_d: effective_output_rate_d as i32,
+                                aspect_ratio: frame_width as f32 / frame_height as f32,
+                                flags: 0, color_space: 709,
+                            });
+                            f.data = Bytes::from(compressed);
+                            f.update_data_length();
+                            send.send_video_codec(f, OMTCodec::H264);
+                        }
+                    }
+                }
+            } else {
+                hw_h264 = None;
+            }
+
+            // H.265 encoding (demand-driven, gated on codec_mask bit 2)
+            if codec_mask & 4 != 0 {
+                use std::io::Write;
+                if hw_h265.is_none() {
+                    match HwEncoderContext::start(
+                        &input_pix_fmt_str, encode_width, encode_height,
+                        effective_output_rate_n, effective_output_rate_d,
+                        &settings.hw_encoder, "h265",
+                    ) {
+                        Ok(ctx) => { println!("H.265 HW encoder started"); hw_h265 = Some(ctx); }
+                        Err(e) => eprintln!("H.265 encoder failed: {}", e),
+                    }
+                }
+                if let Some(ref mut enc) = hw_h265 {
+                    if enc.stdin.write_all(&raw_payload).is_ok() {
+                        if let Some(compressed) = enc.read_frame() {
+                            let mut f = OMTFrame::new(OMTFrameType::Video);
+                            f.video_header = Some(OMTVideoHeader {
+                                codec: OMTCodec::H265 as i32,
+                                width: frame_width as i32, height: frame_height as i32,
+                                frame_rate_n: effective_output_rate_n as i32,
+                                frame_rate_d: effective_output_rate_d as i32,
+                                aspect_ratio: frame_width as f32 / frame_height as f32,
+                                flags: 0, color_space: 709,
+                            });
+                            f.data = Bytes::from(compressed);
+                            f.update_data_length();
+                            send.send_video_codec(f, OMTCodec::H265);
+                        }
+                    }
+                }
+            } else {
+                hw_h265 = None;
             }
 
             frame_count += 1;

@@ -18,6 +18,8 @@ pub struct ServerSenders {
     pub video_lq: broadcast::Sender<OMTFrame>,
     pub video_sq: broadcast::Sender<OMTFrame>,
     pub video_hq: broadcast::Sender<OMTFrame>,
+    pub video_h264: broadcast::Sender<OMTFrame>,
+    pub video_h265: broadcast::Sender<OMTFrame>,
     pub audio: broadcast::Sender<OMTFrame>,
     pub metadata: broadcast::Sender<OMTFrame>,
 }
@@ -28,6 +30,7 @@ pub struct OMTServer {
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
+    active_codec_mask: Arc<AtomicU8>,
 }
 
 impl OMTServer {
@@ -42,6 +45,8 @@ impl OMTServer {
         let (tx_video_lq, _) = broadcast::channel(8);
         let (tx_video_sq, _) = broadcast::channel(8);
         let (tx_video_hq, _) = broadcast::channel(8);
+        let (tx_video_h264, _) = broadcast::channel(8);
+        let (tx_video_h265, _) = broadcast::channel(8);
         let (tx_audio, _) = broadcast::channel(256);
         let (tx_meta, _) = broadcast::channel(64);
 
@@ -52,12 +57,15 @@ impl OMTServer {
                 video_lq: tx_video_lq,
                 video_sq: tx_video_sq,
                 video_hq: tx_video_hq,
+                video_h264: tx_video_h264,
+                video_h265: tx_video_h265,
                 audio: tx_audio,
                 metadata: tx_meta,
             },
             metadata_state: Arc::new(Mutex::new(ServerMetadataState::default())),
             suggested_quality_hint: Arc::new(AtomicU8::new(0)),
             active_quality_mask: Arc::new(AtomicU8::new(0)),
+            active_codec_mask: Arc::new(AtomicU8::new(1)), // VMX1 always
         })
     }
 
@@ -73,6 +81,11 @@ impl OMTServer {
     /// SQ (bit1) is always set when any video receiver is connected.
     pub fn active_quality_mask(&self) -> Arc<AtomicU8> {
         self.active_quality_mask.clone()
+    }
+
+    /// Bitmask of codecs with active receivers: bit0=VMX1, bit1=H264, bit2=H265
+    pub fn active_codec_mask(&self) -> Arc<AtomicU8> {
+        self.active_codec_mask.clone()
     }
 
     pub async fn get_conn_info(&self) -> Vec<ConnInfo> {
@@ -135,13 +148,14 @@ impl OMTServer {
             let metadata_state = Arc::clone(&self.metadata_state);
             let quality_hint = Arc::clone(&self.suggested_quality_hint);
             let quality_mask = Arc::clone(&self.active_quality_mask);
+            let codec_mask = Arc::clone(&self.active_codec_mask);
             let this_conn_id = conn_id;
             let peer_addr = addr.ip().to_string();
             conn_id = conn_id.wrapping_add(1);
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, this_conn_id, peer_addr).await
+                    handle_connection(socket, tx, metadata_state, quality_hint, quality_mask, codec_mask, this_conn_id, peer_addr).await
                 {
                     eprintln!("Connection error: {}", e);
                 }
@@ -189,6 +203,7 @@ pub struct ConnInfo {
     pub video: bool,
     pub audio: bool,
     pub quality: String,
+    pub codec: String,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +215,7 @@ struct SubscriptionState {
     tally_preview: bool,
     tally_program: bool,
     suggested_quality: Option<String>,
+    preferred_codecs: Vec<String>,
     sender_info_xml: Option<String>,
     redirect_address: Option<String>,
 }
@@ -207,7 +223,6 @@ struct SubscriptionState {
 impl Default for SubscriptionState {
     fn default() -> Self {
         SubscriptionState {
-            // Match C# OMTChannel defaults: nothing subscribed until explicit metadata command
             wants_video: false,
             wants_audio: false,
             wants_metadata: false,
@@ -215,6 +230,7 @@ impl Default for SubscriptionState {
             tally_preview: false,
             tally_program: false,
             suggested_quality: None,
+            preferred_codecs: vec!["vmx1".to_string()],
             sender_info_xml: None,
             redirect_address: None,
         }
@@ -227,6 +243,7 @@ async fn handle_connection(
     metadata_state: Arc<Mutex<ServerMetadataState>>,
     suggested_quality_hint: Arc<AtomicU8>,
     active_quality_mask: Arc<AtomicU8>,
+    active_codec_mask: Arc<AtomicU8>,
     conn_id: u64,
     peer_addr: String,
 ) -> Result<(), io::Error> {
@@ -243,6 +260,8 @@ async fn handle_connection(
     let mut rx_video_lq = tx.video_lq.subscribe();
     let mut rx_video_sq = tx.video_sq.subscribe();
     let mut rx_video_hq = tx.video_hq.subscribe();
+    let mut rx_video_h264 = tx.video_h264.subscribe();
+    let mut rx_video_h265 = tx.video_h265.subscribe();
     let mut rx_audio = tx.audio.subscribe();
     let mut rx_meta = tx.metadata.subscribe();
 
@@ -283,6 +302,7 @@ async fn handle_connection(
             video: false,
             audio: false,
             quality: "Default".to_string(),
+            codec: "VMX1".to_string(),
         });
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint, &active_quality_mask).await;
@@ -294,6 +314,7 @@ async fn handle_connection(
     let (tx_video_latest, mut rx_video_latest) = watch::channel::<Option<OMTFrame>>(None);
     let (tx_other, mut rx_other) = mpsc::channel::<OMTFrame>(512);
     let (tx_quality_changed, mut rx_quality_changed) = watch::channel(0u8);
+    let (tx_codec_changed, mut rx_codec_changed) = watch::channel(0u8); // 0=vmx1,1=h264,2=h265
 
     // Producer: Broadcast -> per-connection channels (non-blocking).
     let prod_state = Arc::clone(&state);
@@ -302,18 +323,29 @@ async fn handle_connection(
     let prod_conn_id = conn_id;
     let producer = tokio::spawn(async move {
         let mut current_quality: u8 = 0;
+        let mut current_codec: u8 = 0; // 0=vmx1, 1=h264, 2=h265
 
         while !producer_closed.load(Ordering::Relaxed) {
-            // Pick video channel based on quality level (default=SQ)
+            // Pick video channel based on codec + quality
             let frame = tokio::select! {
-                v = rx_video_sq.recv(), if current_quality == 0 || current_quality == 2 => v,
-                v = rx_video_lq.recv(), if current_quality == 1 => v,
-                v = rx_video_hq.recv(), if current_quality >= 3 => v,
+                // VMX1 quality channels
+                v = rx_video_sq.recv(), if current_codec == 0 && (current_quality == 0 || current_quality == 2) => v,
+                v = rx_video_lq.recv(), if current_codec == 0 && current_quality == 1 => v,
+                v = rx_video_hq.recv(), if current_codec == 0 && current_quality >= 3 => v,
+                // H264/H265 channels
+                v = rx_video_h264.recv(), if current_codec == 1 => v,
+                v = rx_video_h265.recv(), if current_codec == 2 => v,
                 a = rx_audio.recv() => a,
                 m = rx_meta.recv() => m,
                 changed = rx_quality_changed.changed() => {
                     if changed.is_ok() {
                         current_quality = *rx_quality_changed.borrow();
+                    }
+                    continue;
+                }
+                changed = rx_codec_changed.changed() => {
+                    if changed.is_ok() {
+                        current_codec = *rx_codec_changed.borrow();
                     }
                     continue;
                 }
@@ -484,15 +516,21 @@ async fn handle_connection(
                 match result {
                     Ok(frame) => {
                         handle_subscription_frame(conn_id, &frame, &state).await;
-                        let (wants_video, wants_audio, quality, quality_name) = {
+                        let (wants_video, wants_audio, quality, quality_name, codec_id, codec_name) = {
                             let st = state.lock().await;
                             let q = st.suggested_quality.as_deref()
                                 .map(quality_level_from_name).unwrap_or(0);
                             let qn = st.suggested_quality.clone().unwrap_or_else(|| "Default".to_string());
-                            (st.wants_video, st.wants_audio, q, qn)
+                            // Negotiate codec: pick first client-preferred that we support
+                            // For now, use all bits as supported; video pipeline will filter by active_codec_mask
+                            let neg = negotiate_codec(&st.preferred_codecs, 0xFF);
+                            let cid: u8 = match neg.as_str() { "h264" => 1, "h265" => 2, _ => 0 };
+                            let cn = neg.to_uppercase();
+                            (st.wants_video, st.wants_audio, q, qn, cid, cn)
                         };
                         let _ = tx_wants_video.send(wants_video);
                         let _ = tx_quality_changed.send(quality);
+                        let _ = tx_codec_changed.send(codec_id);
                         // Update conn_info
                         {
                             let mut ms = metadata_state.lock().await;
@@ -500,6 +538,7 @@ async fn handle_connection(
                                 ci.video = wants_video;
                                 ci.audio = wants_audio;
                                 ci.quality = quality_name;
+                                ci.codec = codec_name;
                             }
                         }
                         sync_connection_suggested_quality(
@@ -510,6 +549,18 @@ async fn handle_connection(
                             &active_quality_mask,
                         )
                         .await;
+                        // Update codec mask
+                        {
+                            let st = metadata_state.lock().await;
+                            let mut cm: u8 = 0;
+                            for ci in st.conn_info.values() {
+                                if ci.video {
+                                    cm |= codec_name_to_bit(&ci.codec.to_lowercase());
+                                }
+                            }
+                            if cm != 0 { cm |= 1; }
+                            active_codec_mask.store(cm, Ordering::Relaxed);
+                        }
                     }
                     Err(e) => {
                         terminal_error = Some(e);
@@ -627,8 +678,12 @@ async fn handle_subscription_frame(
                     if let Some(v) = attr_get(&attrs, "Quality") {
                         println!("[conn {conn_id}] Client settings: quality={}", v);
                         st.suggested_quality = Some(v.clone());
-                        return;
                     }
+                    if let Some(v) = attr_get(&attrs, "Codec") {
+                        println!("[conn {conn_id}] Client settings: codec={}", v);
+                        st.preferred_codecs = parse_codec_preference(v);
+                    }
+                    return;
                 }
                 "omttally" => {
                     let mut st = state.lock().await;
@@ -802,7 +857,7 @@ async fn update_global_suggested_quality(
     suggested_quality_hint: &Arc<AtomicU8>,
     active_quality_mask: &Arc<AtomicU8>,
 ) {
-    let (max_quality, mask) = {
+    let (max_quality, mask, cmask) = {
         let st = metadata_state.lock().await;
         let max = st.per_connection_suggested_quality
             .values()
@@ -812,18 +867,58 @@ async fn update_global_suggested_quality(
         let mut m: u8 = 0;
         for &q in st.per_connection_suggested_quality.values() {
             match q {
-                1 => m |= 1,      // LQ = bit 0
-                2 => m |= 2,      // SQ = bit 1
-                3.. => m |= 4,    // HQ = bit 2
-                _ => m |= 2,      // default = SQ
+                1 => m |= 1,
+                2 => m |= 2,
+                3.. => m |= 4,
+                _ => m |= 2,
             }
         }
-        // Always include SQ if any video receiver exists
         if m != 0 { m |= 2; }
-        (max, m)
+
+        // Compute active codec mask from conn_info
+        let mut cm: u8 = 0;
+        for ci in st.conn_info.values() {
+            if ci.video {
+                cm |= codec_name_to_bit(&ci.codec.to_lowercase());
+            }
+        }
+        // Always include VMX1 if any video receiver
+        if cm != 0 { cm |= 1; }
+        (max, m, cm)
     };
     suggested_quality_hint.store(max_quality, Ordering::Relaxed);
     active_quality_mask.store(mask, Ordering::Relaxed);
+    // Store codec mask if Arc is available in scope (passed via handle_connection)
+    // This is stored by the caller separately.
+}
+
+fn parse_codec_preference(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Map codec name to bit position: vmx1=0, h264=1, h265=2
+fn codec_name_to_bit(name: &str) -> u8 {
+    match name {
+        "h264" => 2,
+        "h265" => 4,
+        _ => 1, // vmx1 and unknown
+    }
+}
+
+/// Negotiate: pick the first client-preferred codec that the encoder supports.
+/// Returns the codec name (lowercase).
+pub fn negotiate_codec(preferred: &[String], supported_mask: u8) -> String {
+    for c in preferred {
+        let bit = codec_name_to_bit(c);
+        if supported_mask & bit != 0 {
+            return c.clone();
+        }
+    }
+    "vmx1".to_string()
 }
 
 fn parse_xml_tag_and_attrs(

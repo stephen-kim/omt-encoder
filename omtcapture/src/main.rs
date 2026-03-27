@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
     let server = OMTServer::new(6400).await?;
     let suggested_quality_hint = server.suggested_quality_hint();
     let active_quality_mask = server.active_quality_mask();
+    let active_codec_mask = server.active_codec_mask();
     server
         .set_sender_info_xml(Some(build_sender_info_xml(
             &shared_settings.read().await.video.name,
@@ -60,6 +61,7 @@ async fn main() -> Result<()> {
         send.clone(),
         suggested_quality_hint.clone(),
         active_quality_mask.clone(),
+        active_codec_mask.clone(),
     );
     video.start();
 
@@ -130,6 +132,7 @@ async fn main() -> Result<()> {
                     guard.send.clone(),
                     suggested_quality_hint.clone(),
                     active_quality_mask.clone(),
+                    active_codec_mask.clone(),
                 );
                 guard.video.start();
             } else {

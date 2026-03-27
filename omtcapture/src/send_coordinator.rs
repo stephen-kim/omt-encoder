@@ -107,6 +107,22 @@ impl SendCoordinator {
             // no receivers at this quality level, fine
         }
     }
+
+    /// Send a video frame to a codec-specific broadcast channel.
+    #[allow(dead_code)]
+    pub fn send_video_codec(&self, frame: OMTFrame, codec: libomtnet::OMTCodec) {
+        let mut stamped = frame;
+        stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
+            0
+        } else {
+            crate::timebase::monotonic_100ns()
+        };
+        let _ = match codec {
+            libomtnet::OMTCodec::H264 => self.inner.tx.video_h264.send(stamped),
+            libomtnet::OMTCodec::H265 => self.inner.tx.video_h265.send(stamped),
+            _ => self.inner.tx.video.send(stamped),
+        };
+    }
 }
 
 impl Drop for SendCoordinator {
