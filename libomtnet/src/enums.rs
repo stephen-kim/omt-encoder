@@ -71,6 +71,8 @@ pub enum OMTCodec {
     UYVA = 0x41565955,
     P216 = 0x36313250,
     PA16 = 0x36314150,
+    H264 = 0x34363248, // "H264"
+    H265 = 0x35363248, // "H265"
 }
 
 impl Into<i32> for OMTCodec {

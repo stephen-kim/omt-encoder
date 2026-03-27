@@ -156,6 +156,172 @@ mod linux {
         output_buf: Vec<u8>,
     }
 
+    struct HwEncoderContext {
+        child: Child,
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+        codec: OMTCodec,
+        read_buf: Vec<u8>,
+        header_skipped: bool,
+    }
+
+    impl HwEncoderContext {
+        fn start(
+            input_pix_fmt: &str,
+            width: u32,
+            height: u32,
+            fps_n: u32,
+            fps_d: u32,
+            encoder_name: &str,
+            codec_type: &str,
+        ) -> Result<Self, String> {
+            let rate = format!("{}/{}", fps_n, fps_d);
+            let size = format!("{}x{}", width, height);
+
+            // Auto-detect encoder if not specified
+            let enc = if encoder_name.is_empty() {
+                match codec_type {
+                    "h265" => detect_hw_encoder(&["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "libx265"]),
+                    "h264" => detect_hw_encoder(&["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "libx264"]),
+                    _ => return Err("Unknown codec type".to_string()),
+                }
+            } else {
+                encoder_name.to_string()
+            };
+
+            println!("Starting HW encoder: {} ({})", enc, codec_type);
+
+            let mut cmd = Command::new("ffmpeg");
+            cmd.args([
+                "-loglevel", "error",
+                "-f", "rawvideo",
+                "-pix_fmt", input_pix_fmt,
+                "-s", &size,
+                "-r", &rate,
+                "-i", "pipe:0",
+                "-c:v", &enc,
+                "-g", "1",        // GOP=1 (all-intra)
+                "-bf", "0",       // no B-frames
+                "-f", "avi",      // AVI container for frame boundaries
+                "pipe:1",
+            ]);
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+
+            let mut child = cmd.spawn().map_err(|e| format!("ffmpeg spawn: {}", e))?;
+            let stdin = child.stdin.take().ok_or("no stdin")?;
+            let stdout = child.stdout.take().ok_or("no stdout")?;
+
+            let omt_codec = if codec_type == "h264" { OMTCodec::H264 } else { OMTCodec::H265 };
+
+            Ok(HwEncoderContext {
+                child,
+                stdin,
+                stdout,
+                codec: omt_codec,
+                read_buf: vec![0u8; 8 * 1024 * 1024],
+                header_skipped: false,
+            })
+        }
+
+        /// Read one compressed frame from AVI output.
+        /// AVI chunks: 4-byte FourCC + 4-byte size (LE) + data.
+        fn read_frame(&mut self) -> Option<Vec<u8>> {
+            use std::io::Read;
+
+            // Skip AVI header on first call by scanning for first video chunk "00dc"
+            if !self.header_skipped {
+                // Read in small chunks looking for "00dc" or "01dc"
+                let mut hdr_buf = [0u8; 1];
+                let mut window = [0u8; 4];
+                loop {
+                    if self.stdout.read_exact(&mut hdr_buf).is_err() {
+                        return None;
+                    }
+                    window[0] = window[1];
+                    window[1] = window[2];
+                    window[2] = window[3];
+                    window[3] = hdr_buf[0];
+                    // "00dc" = compressed video chunk
+                    if &window == b"00dc" || &window == b"01dc" {
+                        self.header_skipped = true;
+                        break;
+                    }
+                }
+                // Read chunk size (4 bytes LE)
+                let mut size_buf = [0u8; 4];
+                if self.stdout.read_exact(&mut size_buf).is_err() {
+                    return None;
+                }
+                let size = u32::from_le_bytes(size_buf) as usize;
+                if size > self.read_buf.len() {
+                    self.read_buf.resize(size, 0);
+                }
+                if self.stdout.read_exact(&mut self.read_buf[..size]).is_err() {
+                    return None;
+                }
+                // Skip padding byte if odd size
+                if size % 2 != 0 {
+                    let _ = self.stdout.read_exact(&mut [0u8; 1]);
+                }
+                return Some(self.read_buf[..size].to_vec());
+            }
+
+            // Read next AVI chunk
+            let mut chunk_hdr = [0u8; 8];
+            if self.stdout.read_exact(&mut chunk_hdr).is_err() {
+                return None;
+            }
+            let fourcc = &chunk_hdr[..4];
+            let size = u32::from_le_bytes([chunk_hdr[4], chunk_hdr[5], chunk_hdr[6], chunk_hdr[7]]) as usize;
+
+            // Skip non-video chunks (e.g., "idx1" index)
+            if fourcc != b"00dc" && fourcc != b"01dc" {
+                // Skip this chunk's data
+                if size > 0 && size < 100_000_000 {
+                    let mut skip = vec![0u8; size];
+                    let _ = self.stdout.read_exact(&mut skip);
+                }
+                // Try next chunk recursively
+                return self.read_frame();
+            }
+
+            if size > self.read_buf.len() {
+                self.read_buf.resize(size, 0);
+            }
+            if self.stdout.read_exact(&mut self.read_buf[..size]).is_err() {
+                return None;
+            }
+            if size % 2 != 0 {
+                let _ = self.stdout.read_exact(&mut [0u8; 1]);
+            }
+            Some(self.read_buf[..size].to_vec())
+        }
+    }
+
+    impl Drop for HwEncoderContext {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn detect_hw_encoder(candidates: &[&str]) -> String {
+        for enc in candidates {
+            let result = Command::new("ffmpeg")
+                .args(["-hide_banner", "-encoders"])
+                .output();
+            if let Ok(output) = result {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if text.contains(enc) {
+                    return enc.to_string();
+                }
+            }
+        }
+        candidates.last().unwrap_or(&"libx265").to_string()
+    }
+
     struct PreviewSink {
         output: String,
         pix_fmt: String,
@@ -459,6 +625,32 @@ mod linux {
             );
         }
 
+        // HW encoder (H.264/H.265 all-intra) — used instead of VMX when configured.
+        let use_hw_encoder = settings.encoder == "h264" || settings.encoder == "h265";
+        let mut hw_encoder: Option<HwEncoderContext> = if use_hw_encoder {
+            let input_pix_fmt = codec_to_pix_fmt(encode_codec);
+            match HwEncoderContext::start(
+                input_pix_fmt,
+                encode_width,
+                encode_height,
+                effective_output_rate_n,
+                effective_output_rate_d,
+                &settings.hw_encoder,
+                &settings.encoder,
+            ) {
+                Ok(ctx) => {
+                    println!("HW encoder started: {} ({})", settings.encoder, settings.hw_encoder);
+                    Some(ctx)
+                }
+                Err(e) => {
+                    eprintln!("HW encoder failed: {}. Falling back to VMX1.", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
                 // Caller requested a config reload.
@@ -555,8 +747,28 @@ mod linux {
                     )
                 };
 
-            let raw_payload = payload.clone(); // Keep a copy for multi-quality encode
-            let network_frame = if let (Some(inst), Some(_fmt)) =
+            let raw_payload = payload.clone();
+
+            // HW encoder path (H.264/H.265 all-intra)
+            let network_frame = if let Some(ref mut hw_enc) = hw_encoder {
+                use std::io::Write;
+                if hw_enc.stdin.write_all(&payload).is_ok() {
+                    if let Some(compressed) = hw_enc.read_frame() {
+                        Some((
+                            Bytes::from(compressed),
+                            hw_enc.codec,
+                            None::<i32>,
+                            0u32,
+                        ))
+                    } else {
+                        eprintln!("HW encoder read failed");
+                        None
+                    }
+                } else {
+                    eprintln!("HW encoder write failed");
+                    None
+                }
+            } else if let (Some(inst), Some(_fmt)) =
                 (vmx_instance, codec_to_vmx_image_format(frame_codec))
             {
                 let err = unsafe {

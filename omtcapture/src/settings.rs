@@ -15,6 +15,11 @@ pub struct VideoSettings {
     pub frame_rate_d: u32,
     pub codec: String,
     pub use_native_format: bool,
+    /// Video encoder: "vmx1" (default, CPU), "h264" (HW all-intra), "h265" (HW all-intra)
+    pub encoder: String,
+    /// FFmpeg HW encoder name override (e.g. "hevc_rkmpp", "h264_v4l2m2m").
+    /// Leave empty for auto-detect.
+    pub hw_encoder: String,
 }
 
 impl Default for VideoSettings {
@@ -29,6 +34,8 @@ impl Default for VideoSettings {
             frame_rate_d: 1001,
             codec: "YUY2".to_string(),
             use_native_format: true,
+            encoder: "vmx1".to_string(),
+            hw_encoder: String::new(),
         }
     }
 }

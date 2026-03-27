@@ -278,6 +278,8 @@ fn video_settings_changed(old: &Settings, new: &Settings) -> bool {
         || old.video.frame_rate_d != new.video.frame_rate_d
         || old.video.codec != new.video.codec
         || old.video.use_native_format != new.video.use_native_format
+        || old.video.encoder != new.video.encoder
+        || old.video.hw_encoder != new.video.hw_encoder
 }
 
 fn send_settings_changed(old: &Settings, new: &Settings) -> bool {

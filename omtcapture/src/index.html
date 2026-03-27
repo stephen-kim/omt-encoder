@@ -50,6 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
+    encoder: "Encoder", encoderHelp: "VMX1 uses CPU. H.264/H.265 use hardware encoder if available.",
     saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients",
   },
   ko: {
@@ -96,6 +97,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
+    encoder: "인코더", encoderHelp: "VMX1은 CPU 사용. H.264/H.265는 하드웨어 인코더를 사용합니다.",
     saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트",
   },
   ja: {
@@ -142,6 +144,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
+    encoder: "エンコーダー", encoderHelp: "VMX1はCPU使用。H.264/H.265はハードウェアエンコーダーを使用します。",
     saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中",
   },
   es: {
@@ -188,6 +191,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
+    encoder: "Codificador", encoderHelp: "VMX1 usa CPU. H.264/H.265 usan codificador por hardware si esta disponible.",
     saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes",
   },
 };
@@ -545,6 +549,14 @@ small { color: var(--muted); display: block; margin-top: 8px; }
       <label data-i18n="sourceName">Source name</label>
       <input id="videoName" />
       <div class="help" data-i18n="sourceNameHelp">Shown in the receiver list. Keep it short and unique.</div>
+
+      <label data-i18n="encoder">Encoder</label>
+      <select id="videoEncoder">
+        <option value="vmx1">VMX1 (CPU)</option>
+        <option value="h264">H.264 All-Intra (HW)</option>
+        <option value="h265">H.265 All-Intra (HW)</option>
+      </select>
+      <div class="help" data-i18n="encoderHelp">VMX1 uses CPU. H.264/H.265 use hardware encoder if available.</div>
 
       <div class="check-row">
         <input id="videoUseNative" type="checkbox" onchange="toggleNativeInputs()" />
@@ -987,6 +999,7 @@ async function loadConfig() {
   document.getElementById('videoFrameRateN').value = data.video.frame_rate_n;
   document.getElementById('videoFrameRateD').value = data.video.frame_rate_d;
   document.getElementById('videoUseNative').checked = data.video.use_native_format;
+  document.getElementById('videoEncoder').value = data.video.encoder || 'vmx1';
   document.getElementById('videoCodec').value = data.video.codec;
   document.getElementById('videoPreset').value = detectVideoPreset(data.video.width, data.video.height);
   toggleNativeInputs();
@@ -1005,6 +1018,7 @@ async function saveConfig() {
   payload.video.name = document.getElementById('videoName').value;
   payload.video.device_path = document.getElementById('videoDevicePath').value;
   payload.video.use_native_format = document.getElementById('videoUseNative').checked;
+  payload.video.encoder = document.getElementById('videoEncoder').value;
 
   // If native input is enabled, transform fields are disabled; don't overwrite them with blanks/0.
   if (!payload.video.use_native_format) {
