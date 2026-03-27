@@ -8,6 +8,27 @@ use std::time::Duration;
 use crate::send_coordinator::SendCoordinator;
 use crate::settings::{PreviewSettings, VideoSettings};
 
+/// Shared raw frame for web preview snapshot generation.
+#[derive(Clone)]
+pub struct SharedPreviewFrame {
+    pub data: Arc<std::sync::Mutex<Option<PreviewFrameData>>>,
+}
+
+pub struct PreviewFrameData {
+    pub raw: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub pix_fmt: String,
+}
+
+impl SharedPreviewFrame {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
 pub struct VideoPipeline {
     settings: Arc<tokio::sync::RwLock<VideoSettings>>,
     preview: Arc<tokio::sync::RwLock<PreviewSettings>>,
@@ -19,6 +40,7 @@ pub struct VideoPipeline {
     preview_restart_requested: Arc<std::sync::atomic::AtomicBool>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     send: SendCoordinator,
+    pub shared_frame: SharedPreviewFrame,
 }
 
 impl VideoPipeline {
@@ -41,6 +63,7 @@ impl VideoPipeline {
             preview_restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             thread_handle: None,
             send,
+            shared_frame: SharedPreviewFrame::new(),
         }
     }
 
@@ -52,6 +75,7 @@ impl VideoPipeline {
         let suggested_quality_hint = self.suggested_quality_hint.clone();
         let active_quality_mask = self.active_quality_mask.clone();
         let active_codec_mask = self.active_codec_mask.clone();
+        let shared_frame = self.shared_frame.clone();
 
         #[cfg(target_os = "linux")]
         let settings = self.settings.clone();
@@ -77,6 +101,7 @@ impl VideoPipeline {
                         suggested_quality_hint.clone(),
                         active_quality_mask.clone(),
                         active_codec_mask.clone(),
+                        shared_frame.clone(),
                     );
                     if running.load(std::sync::atomic::Ordering::SeqCst) {
                         thread::sleep(Duration::from_millis(200));
@@ -353,6 +378,7 @@ mod linux {
         suggested_quality_hint: Arc<AtomicU8>,
         active_quality_mask: Arc<AtomicU8>,
         active_codec_mask: Arc<AtomicU8>,
+        shared_frame: SharedPreviewFrame,
     ) {
         println!(
             "Starting Linux V4L2 pipeline on {}...",
@@ -570,6 +596,7 @@ mod linux {
         );
         let mut last_output_frame_at = Instant::now() - output_frame_interval;
         let mut last_vmx_error_log = Instant::now() - Duration::from_secs(5);
+        let mut last_snapshot = Instant::now() - Duration::from_secs(2);
         let mut vmx_instance: Option<*mut root::VMX_INSTANCE> = None;
         let mut vmx_buffer = vec![
             0u8;
@@ -733,6 +760,20 @@ mod linux {
                 };
 
             let raw_payload = payload.clone();
+
+            // Share raw frame for web preview (~1 per second)
+            if last_snapshot.elapsed() >= Duration::from_millis(1000) {
+                last_snapshot = Instant::now();
+                if let Ok(mut lock) = shared_frame.data.try_lock() {
+                    *lock = Some(PreviewFrameData {
+                        raw: payload.to_vec(),
+                        width: frame_width,
+                        height: frame_height,
+                        pix_fmt: codec_to_pix_fmt(frame_codec).to_string(),
+                    });
+                }
+            }
+
             let codec_mask = active_codec_mask.load(Ordering::Relaxed);
 
             // VMX1 encoding

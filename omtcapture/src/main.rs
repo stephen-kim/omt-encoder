@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
         active_codec_mask.clone(),
     );
     video.start();
+    let video_shared_frame = video.shared_frame.clone();
 
     let mdns_publisher = Arc::new(Mutex::new(discovery::MdnsPublisher::start(
         &initial_settings.video.name,
@@ -103,11 +104,11 @@ async fn main() -> Result<()> {
             preview_frame: preview_frame.clone(),
         };
 
-        // Background: generate preview JPEG snapshots from framebuffer
+        // Background: generate preview JPEG snapshots from video pipeline frames
         let pf = preview_frame.clone();
-        let preview_settings = shared_settings.read().await.preview.clone();
+        let sf = video_shared_frame.clone();
         tokio::spawn(async move {
-            generate_preview_loop(pf, preview_settings).await;
+            generate_preview_loop(pf, sf).await;
         });
 
         tokio::spawn(async move {
@@ -323,86 +324,57 @@ fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
 }
 
 async fn generate_preview_loop(
-    frame: Arc<tokio::sync::Mutex<Option<bytes::Bytes>>>,
-    preview: settings::PreviewSettings,
+    jpeg_out: Arc<tokio::sync::Mutex<Option<bytes::Bytes>>>,
+    shared_frame: video_pipeline::SharedPreviewFrame,
 ) {
-    use std::process::Command;
-
-    // Find the primary framebuffer from preview outputs
-    let fb_device = preview
-        .outputs
-        .first()
-        .map(|o| o.device.clone())
-        .or_else(|| {
-            if !preview.output_devices.is_empty() {
-                Some(preview.output_devices[0].clone())
-            } else {
-                Some(preview.output_device.clone())
-            }
-        })
-        .unwrap_or_default();
-
-    if fb_device.is_empty() || !std::path::Path::new(&fb_device).exists() {
-        println!("Preview snapshot: no framebuffer available");
-        return;
-    }
-
-    // Read framebuffer size
-    let fb_name = fb_device.split('/').last().unwrap_or("fb0");
-    let size_path = format!("/sys/class/graphics/{}/virtual_size", fb_name);
-    let (width, height) = if let Ok(size) = std::fs::read_to_string(&size_path) {
-        let parts: Vec<&str> = size.trim().split(',').collect();
-        if parts.len() == 2 {
-            (
-                parts[0].parse::<u32>().unwrap_or(0),
-                parts[1].parse::<u32>().unwrap_or(0),
-            )
-        } else {
-            (0, 0)
-        }
-    } else {
-        (0, 0)
-    };
-
-    if width == 0 || height == 0 {
-        println!("Preview snapshot: can't read framebuffer size");
-        return;
-    }
-
-    let pix_fmt = preview
-        .outputs
-        .first()
-        .map(|o| o.pixel_format.clone())
-        .unwrap_or_else(|| preview.pixel_format.clone());
-    let pix_fmt = if pix_fmt.is_empty() { "rgb565le".to_string() } else { pix_fmt };
-
-    println!(
-        "Preview snapshot: {} {}x{} {}",
-        fb_device, width, height, pix_fmt
-    );
+    use std::io::Write;
 
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
-        let result = Command::new("ffmpeg")
-            .args([
-                "-loglevel", "error",
-                "-f", "rawvideo",
-                "-pix_fmt", &pix_fmt,
-                "-s", &format!("{}x{}", width, height),
-                "-i", &fb_device,
-                "-frames:v", "1",
-                "-f", "image2",
-                "-vcodec", "mjpeg",
-                "-q:v", "8",
-                "pipe:1",
-            ])
-            .output();
-
-        if let Ok(output) = result {
-            if output.status.success() && !output.stdout.is_empty() {
-                *frame.lock().await = Some(bytes::Bytes::from(output.stdout));
+        // Read latest raw frame from video pipeline
+        let (raw, width, height, pix_fmt) = {
+            let lock = shared_frame.data.lock().unwrap();
+            match lock.as_ref() {
+                Some(f) => (f.raw.clone(), f.width, f.height, f.pix_fmt.clone()),
+                None => continue,
             }
+        };
+
+        // Convert to JPEG via ffmpeg (runs in blocking threadpool)
+        let result = tokio::task::spawn_blocking(move || {
+            let mut child = std::process::Command::new("ffmpeg")
+                .args([
+                    "-loglevel", "error",
+                    "-f", "rawvideo",
+                    "-pix_fmt", &pix_fmt,
+                    "-s", &format!("{}x{}", width, height),
+                    "-i", "pipe:0",
+                    "-frames:v", "1",
+                    "-vf", "scale=640:-2",
+                    "-f", "image2",
+                    "-vcodec", "mjpeg",
+                    "-q:v", "8",
+                    "pipe:1",
+                ])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok()?;
+            child.stdin.as_mut()?.write_all(&raw).ok()?;
+            drop(child.stdin.take());
+            let output = child.wait_with_output().ok()?;
+            if output.status.success() && !output.stdout.is_empty() {
+                Some(bytes::Bytes::from(output.stdout))
+            } else {
+                None
+            }
+        })
+        .await;
+
+        if let Ok(Some(jpeg)) = result {
+            *jpeg_out.lock().await = Some(jpeg);
         }
     }
 }
