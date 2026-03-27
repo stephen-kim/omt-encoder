@@ -483,6 +483,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.stat-val { font-size:15px; font-weight:700; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .toast {
   position: fixed; bottom: 24px; left: 50%;
   transform: translateX(-50%) translateY(80px);
@@ -520,26 +521,26 @@ small { color: var(--muted); display: block; margin-top: 8px; }
     </div>
   </header>
 
-  <div class="card" style="display:flex;flex-wrap:wrap;gap:20px 32px;padding:14px 18px;">
-    <div>
+  <div class="card" style="display:flex;gap:0;padding:0;overflow:hidden;">
+    <div style="flex:0.5;min-width:0;padding:14px 16px;">
       <div class="section-label">CPU</div>
-      <div id="statCpu" style="font-size:15px;font-weight:700;margin-top:4px;">—</div>
+      <div id="statCpu" class="stat-val">—</div>
     </div>
-    <div>
+    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statMem">Memory</div>
-      <div id="statMem" style="font-size:15px;font-weight:700;margin-top:4px;">—</div>
+      <div id="statMem" class="stat-val">—</div>
     </div>
-    <div>
+    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statVideo">Video</div>
-      <div id="statVideo" style="font-size:15px;font-weight:700;margin-top:4px;">—</div>
+      <div id="statVideo" class="stat-val">—</div>
     </div>
-    <div>
+    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statCodecs">Codecs</div>
-      <div id="statCodecs" style="font-size:15px;font-weight:700;margin-top:4px;">—</div>
+      <div id="statCodecs" class="stat-val">—</div>
     </div>
-    <div>
+    <div style="flex:0.5;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statClients">Clients</div>
-      <div id="statClients" style="font-size:15px;font-weight:700;margin-top:4px;">0</div>
+      <div id="statClients" class="stat-val">0</div>
     </div>
   </div>
 
