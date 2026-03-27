@@ -217,7 +217,8 @@ pub struct ConnInfo {
     pub audio: bool,
     pub quality: String,
     pub codec: String,
-    pub connected_at: String,
+    #[serde(rename = "connectedSince")]
+    pub connected_since: u64, // seconds since connection
 }
 
 #[derive(Debug, Clone)]
@@ -318,13 +319,10 @@ async fn handle_connection(
             audio: false,
             quality: "Default".to_string(),
             codec: "VMX1".to_string(),
-            connected_at: {
-                // Use local time via date command
-                String::from_utf8_lossy(
-                    &std::process::Command::new("date").arg("+%H:%M:%S")
-                        .output().map(|o| o.stdout).unwrap_or_default()
-                ).trim().to_string()
-            },
+            connected_since: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         });
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint, &active_quality_mask).await;

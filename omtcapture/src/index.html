@@ -50,7 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
-    statCodecs: "Supported Codecs", colIp: "IP", colSignal: "Signal", colQuality: "Quality", colCodec: "Codec", colConnected: "Connected",
+    statCodecs: "Supported Codecs", colIp: "IP", colSignal: "Signal", colQuality: "Quality", colCodec: "Codec", colDuration: "Duration",
     saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients",
   },
   ko: {
@@ -97,7 +97,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
-    statCodecs: "지원 코덱", colIp: "IP", colSignal: "신호", colQuality: "화질", colCodec: "코덱", colConnected: "연결 시간",
+    statCodecs: "지원 코덱", colIp: "IP", colSignal: "신호", colQuality: "화질", colCodec: "코덱", colDuration: "연결 시간",
     saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트",
   },
   ja: {
@@ -144,7 +144,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
-    statCodecs: "対応コーデック", colIp: "IP", colSignal: "信号", colQuality: "画質", colCodec: "コーデック", colConnected: "接続時刻",
+    statCodecs: "対応コーデック", colIp: "IP", colSignal: "信号", colQuality: "画質", colCodec: "コーデック", colDuration: "接続時間",
     saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中",
   },
   es: {
@@ -191,7 +191,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
-    statCodecs: "Códecs soportados", colIp: "IP", colSignal: "Señal", colQuality: "Calidad", colCodec: "Códec", colConnected: "Conectado",
+    statCodecs: "Códecs soportados", colIp: "IP", colSignal: "Señal", colQuality: "Calidad", colCodec: "Códec", colDuration: "Duración",
     saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes",
   },
 };
@@ -658,7 +658,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
             <th style="padding:6px 8px;" data-i18n="colSignal">Signal</th>
             <th style="padding:6px 8px;" data-i18n="colQuality">Quality</th>
             <th style="padding:6px 8px;" data-i18n="colCodec">Codec</th>
-            <th style="padding:6px 8px;" data-i18n="colConnected">Connected</th>
+            <th style="padding:6px 8px;" data-i18n="colDuration">Duration</th>
           </tr>
         </thead>
         <tbody id="clientsList"></tbody>
@@ -1108,6 +1108,17 @@ async function saveConfig() {
   }
 }
 
+function formatDuration(epochSecs) {
+  if (!epochSecs) return '—';
+  const delta = Math.floor(Date.now() / 1000) - epochSecs;
+  if (delta < 0) return '0s';
+  const h = Math.floor(delta / 3600);
+  const m = Math.floor((delta % 3600) / 60);
+  const s = delta % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 async function refreshStats() {
   try {
     const res = await fetch('/api/stats');
@@ -1119,10 +1130,10 @@ async function refreshStats() {
     const conns = s.connections || [];
     const byAddr = {};
     conns.forEach(c => {
-      if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '', codec: '', connected_at: '' };
+      if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '', codec: '', connectedSince: 0 };
       if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; byAddr[c.addr].codec = c.codec || ''; }
       if (c.audio) byAddr[c.addr].audio = true;
-      if (c.connected_at) byAddr[c.addr].connected_at = c.connected_at;
+      if (c.connectedSince) byAddr[c.addr].connectedSince = Math.max(byAddr[c.addr].connectedSince, c.connectedSince);
     });
     const ips = Object.keys(byAddr);
     document.getElementById('statClients').textContent = ips.length;
@@ -1138,7 +1149,7 @@ async function refreshStats() {
           <td style="padding:8px;">${sig}</td>
           <td style="padding:8px;">${i.quality || '—'}</td>
           <td style="padding:8px;">${i.codec || '—'}</td>
-          <td style="padding:8px;">${i.connected_at || '—'}</td></tr>`;
+          <td style="padding:8px;">${formatDuration(i.connectedSince)}</td></tr>`;
       }).join('');
       applyI18n();
     } else {
