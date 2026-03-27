@@ -319,11 +319,11 @@ async fn handle_connection(
             quality: "Default".to_string(),
             codec: "VMX1".to_string(),
             connected_at: {
-                let d = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                let secs = d.as_secs() % 86400;
-                format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+                // Use local time via date command
+                String::from_utf8_lossy(
+                    &std::process::Command::new("date").arg("+%H:%M:%S")
+                        .output().map(|o| o.stdout).unwrap_or_default()
+                ).trim().to_string()
             },
         });
     }
