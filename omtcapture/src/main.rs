@@ -320,7 +320,7 @@ fn detect_supported_codecs() -> u8 {
     {
         let text = String::from_utf8_lossy(&output.stdout);
 
-        // H.264 HW encoders
+        // H.264 HW encoders only (no libx264 software fallback)
         for enc in ["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "h264_nvenc", "h264_qsv"] {
             if text.contains(enc) {
                 mask |= 2;
@@ -328,7 +328,7 @@ fn detect_supported_codecs() -> u8 {
             }
         }
 
-        // H.265 HW encoders
+        // H.265 HW encoders only (no libx265 software fallback)
         for enc in ["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "hevc_nvenc", "hevc_qsv"] {
             if text.contains(enc) {
                 mask |= 4;

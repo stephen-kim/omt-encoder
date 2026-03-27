@@ -186,8 +186,8 @@ mod linux {
             // Auto-detect encoder if not specified
             let enc = if encoder_name.is_empty() {
                 match codec_type {
-                    "h265" => detect_hw_encoder(&["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "libx265"]),
-                    "h264" => detect_hw_encoder(&["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "libx264"]),
+                    "h265" => detect_hw_encoder(&["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "hevc_nvenc", "hevc_qsv"]),
+                    "h264" => detect_hw_encoder(&["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "h264_nvenc", "h264_qsv"]),
                     _ => return Err("Unknown codec type".to_string()),
                 }
             } else {
