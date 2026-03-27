@@ -333,11 +333,21 @@ async fn get_stats(State(state): State<WebState>) -> impl IntoResponse {
     } else {
         vec![]
     };
+    let codecs = if let Some(ref server) = state.server {
+        let mask = server.supported_codec_mask().load(std::sync::atomic::Ordering::Relaxed);
+        let mut c = vec!["VMX1"];
+        if mask & 2 != 0 { c.push("H.264"); }
+        if mask & 4 != 0 { c.push("H.265"); }
+        c.join(", ")
+    } else {
+        "VMX1".to_string()
+    };
     Json(serde_json::json!({
         "cpu": cpu,
         "mem": mem,
         "connections": connections,
         "videoFormat": video_format,
+        "codecs": codecs,
     }))
 }
 
