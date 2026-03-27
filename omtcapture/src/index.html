@@ -50,7 +50,7 @@ const I18N = {
     webSmall: "Video changes apply without reboot. Web port changes require restart.",
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
-    statCodecs: "Supported Codecs",
+    statCodecs: "Supported Codecs", colIp: "IP", colSignal: "Signal", colQuality: "Quality", colCodec: "Codec", colConnected: "Connected",
     saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients",
   },
   ko: {
@@ -97,7 +97,7 @@ const I18N = {
     webSmall: "비디오 변경은 재부팅 없이 적용됩니다. 웹 포트 변경은 재시작이 필요합니다.",
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
-    statCodecs: "지원 코덱",
+    statCodecs: "지원 코덱", colIp: "IP", colSignal: "신호", colQuality: "화질", colCodec: "코덱", colConnected: "연결 시간",
     saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트",
   },
   ja: {
@@ -144,7 +144,7 @@ const I18N = {
     webSmall: "映像の変更は再起動なしで適用されます。Webポートの変更には再起動が必要です。",
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
-    statCodecs: "対応コーデック",
+    statCodecs: "対応コーデック", colIp: "IP", colSignal: "信号", colQuality: "画質", colCodec: "コーデック", colConnected: "接続時刻",
     saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中",
   },
   es: {
@@ -191,7 +191,7 @@ const I18N = {
     webSmall: "Los cambios de video se aplican sin reinicio. Los cambios de puerto web requieren reinicio.",
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
-    statCodecs: "Códecs soportados",
+    statCodecs: "Códecs soportados", colIp: "IP", colSignal: "Señal", colQuality: "Calidad", colCodec: "Códec", colConnected: "Conectado",
     saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes",
   },
 };
@@ -484,6 +484,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   to { opacity: 1; transform: translateY(0); }
 }
 .stat-val { font-size:15px; font-weight:700; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.stat-item .section-label { margin-top: 0; }
 .toast {
   position: fixed; bottom: 24px; left: 50%;
   transform: translateX(-50%) translateY(80px);
@@ -522,23 +523,23 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   </header>
 
   <div class="card" style="display:flex;gap:0;padding:0;overflow:hidden;">
-    <div style="flex:0.5;min-width:0;padding:14px 16px;">
+    <div class="stat-item" style="flex:0.5;min-width:0;padding:14px 16px;">
       <div class="section-label">CPU</div>
       <div id="statCpu" class="stat-val">—</div>
     </div>
-    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
+    <div class="stat-item" style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statMem">Memory</div>
       <div id="statMem" class="stat-val">—</div>
     </div>
-    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
+    <div class="stat-item" style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statVideo">Video</div>
       <div id="statVideo" class="stat-val">—</div>
     </div>
-    <div style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
+    <div class="stat-item" style="flex:1;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statCodecs">Codecs</div>
       <div id="statCodecs" class="stat-val">—</div>
     </div>
-    <div style="flex:0.5;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
+    <div class="stat-item" style="flex:0.5;min-width:0;padding:14px 16px;border-left:1px solid var(--border);">
       <div class="section-label" data-i18n="statClients">Clients</div>
       <div id="statClients" class="stat-val">0</div>
     </div>
@@ -650,7 +651,18 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   <section class="grid">
     <div id="clientsCard" class="card" style="grid-column: 1 / -1; display:none;">
       <div class="card-title" data-i18n="statClients">Clients</div>
-      <div id="clientsList" style="font-size:13px;line-height:1.8;"></div>
+      <table id="clientsTable" style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead>
+          <tr style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;">
+            <th style="padding:6px 8px;" data-i18n="colIp">IP</th>
+            <th style="padding:6px 8px;" data-i18n="colSignal">Signal</th>
+            <th style="padding:6px 8px;" data-i18n="colQuality">Quality</th>
+            <th style="padding:6px 8px;" data-i18n="colCodec">Codec</th>
+            <th style="padding:6px 8px;" data-i18n="colConnected">Connected</th>
+          </tr>
+        </thead>
+        <tbody id="clientsList"></tbody>
+      </table>
     </div>
   </section>
 
@@ -1105,12 +1117,12 @@ async function refreshStats() {
     document.getElementById('statVideo').textContent = s.videoFormat || '—';
     document.getElementById('statCodecs').textContent = s.codecs || '—';
     const conns = s.connections || [];
-    // Merge per IP
     const byAddr = {};
     conns.forEach(c => {
-      if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '' };
-      if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; }
+      if (!byAddr[c.addr]) byAddr[c.addr] = { video: false, audio: false, quality: '', codec: '', connected_at: '' };
+      if (c.video) { byAddr[c.addr].video = true; byAddr[c.addr].quality = c.quality || ''; byAddr[c.addr].codec = c.codec || ''; }
       if (c.audio) byAddr[c.addr].audio = true;
+      if (c.connected_at) byAddr[c.addr].connected_at = c.connected_at;
     });
     const ips = Object.keys(byAddr);
     document.getElementById('statClients').textContent = ips.length;
@@ -1119,13 +1131,16 @@ async function refreshStats() {
     if (ips.length > 0) {
       card.style.display = '';
       list.innerHTML = ips.map(addr => {
-        const info = byAddr[addr];
-        const parts = [];
-        if (info.video) parts.push('Video');
-        if (info.audio) parts.push('Audio');
-        const q = info.quality && info.quality !== 'Default' ? ` (${info.quality})` : '';
-        return `<div>${addr} — ${parts.join(', ')}${q}</div>`;
+        const i = byAddr[addr];
+        const sig = [i.video ? 'Video' : '', i.audio ? 'Audio' : ''].filter(Boolean).join(', ') || '—';
+        return `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:8px;">${addr}</td>
+          <td style="padding:8px;">${sig}</td>
+          <td style="padding:8px;">${i.quality || '—'}</td>
+          <td style="padding:8px;">${i.codec || '—'}</td>
+          <td style="padding:8px;">${i.connected_at || '—'}</td></tr>`;
       }).join('');
+      applyI18n();
     } else {
       card.style.display = 'none';
     }

@@ -217,6 +217,7 @@ pub struct ConnInfo {
     pub audio: bool,
     pub quality: String,
     pub codec: String,
+    pub connected_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +318,13 @@ async fn handle_connection(
             audio: false,
             quality: "Default".to_string(),
             codec: "VMX1".to_string(),
+            connected_at: {
+                let d = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let secs = d.as_secs() % 86400;
+                format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+            },
         });
     }
     update_global_suggested_quality(&metadata_state, &suggested_quality_hint, &active_quality_mask).await;
