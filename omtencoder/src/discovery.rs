@@ -7,7 +7,7 @@ pub struct MdnsPublisher {
 
 impl MdnsPublisher {
     pub fn start(source_name: &str, port: u16) -> Option<Self> {
-        let hostname = read_hostname().unwrap_or_else(|| "omtcapture".to_string());
+        let hostname = read_hostname().unwrap_or_else(|| "omtencoder".to_string());
         let instance = build_instance_name(&hostname, source_name);
 
         let mut cmd = Command::new("avahi-publish-service");

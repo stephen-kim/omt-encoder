@@ -633,7 +633,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omtcapture"
+name = "omtencoder"
 version = "0.1.0"
 dependencies = [
  "alsa",

@@ -423,7 +423,7 @@ fn get_mem_usage() -> String {
 
 fn get_video_format() -> String {
     // Read current config to get active video format
-    if let Ok(config) = fs::read_to_string("/opt/omtcapture-rs/config.json") {
+    if let Ok(config) = fs::read_to_string("/opt/omtencoder/config.json") {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&config) {
             let w = v["video"]["width"].as_u64().unwrap_or(0);
             let h = v["video"]["height"].as_u64().unwrap_or(0);

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "omtcapture",
+    "omtencoder",
     "libomtnet",
     "libvmx-sys"
 ]

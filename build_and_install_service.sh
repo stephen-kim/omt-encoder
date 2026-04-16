@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
 SKIP_LCD="${SKIP_LCD:-0}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/omtcapture-rs}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/omtencoder}"
 SKIP_DEPS="${SKIP_DEPS:-0}"
 LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
@@ -61,9 +61,9 @@ if [[ -d /opt/omtcapture ]]; then
 fi
 
 # Stop existing Rust service before reinstall
-if systemctl is-active --quiet omtcapture-rs 2>/dev/null; then
-  echo "  Stopping existing omtcapture-rs service..."
-  sudo systemctl stop omtcapture-rs
+if systemctl is-active --quiet omtencoder 2>/dev/null; then
+  echo "  Stopping existing omtencoder service..."
+  sudo systemctl stop omtencoder
 fi
 
 # ── Install dependencies ─────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ fi
 
 echo "Building omtcapture (release)..."
 cd "$ROOT_DIR"
-cargo build --release -p omtcapture
+cargo build --release -p omtencoder
 
 # ── Kernel tuning (TCP send buffers for glitch-free audio streaming) ───────
 SYSCTL_CONF="/etc/sysctl.d/99-omt.conf"
@@ -132,17 +132,17 @@ if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
   sudo cp "$ROOT_DIR/omtcapture/config.json" "$INSTALL_DIR/"
 fi
 
-sudo cp "$ROOT_DIR/omtcapture/omtcapture-rs.service" /etc/systemd/system/omtcapture-rs.service
+sudo cp "$ROOT_DIR/omtcapture/omtencoder.service" /etc/systemd/system/omtencoder.service
 sudo systemctl daemon-reload
-sudo systemctl enable omtcapture-rs
-sudo systemctl restart omtcapture-rs
+sudo systemctl enable omtencoder
+sudo systemctl restart omtencoder
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 echo "Running post-install checks..."
 sleep 1
-if ! systemctl is-active --quiet omtcapture-rs; then
-  echo "ERROR: omtcapture-rs service is not active."
-  sudo systemctl status omtcapture-rs --no-pager || true
+if ! systemctl is-active --quiet omtencoder; then
+  echo "ERROR: omtencoder service is not active."
+  sudo systemctl status omtencoder --no-pager || true
   exit 1
 fi
 
@@ -170,6 +170,6 @@ cat <<MESSAGE
 Install complete.
 - Binary: $INSTALL_DIR/omtcapture
 - Config: $INSTALL_DIR/config.json
-- Service: sudo systemctl status omtcapture-rs
-- Logs: journalctl -u omtcapture-rs -f
+- Service: sudo systemctl status omtencoder
+- Logs: journalctl -u omtencoder -f
 MESSAGE

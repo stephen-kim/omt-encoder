@@ -3,8 +3,8 @@ Description=OMT Capture (Rust)
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/omtcapture-rs
-ExecStart=/opt/omtcapture-rs/omtcapture
+WorkingDirectory=/opt/omtencoder
+ExecStart=/opt/omtencoder/omtcapture
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
