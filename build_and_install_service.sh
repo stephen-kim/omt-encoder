@@ -2,11 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LCD_DRIVER="${LCD_DRIVER:-LCD35-show}"
-SKIP_LCD="${SKIP_LCD:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/omtencoder}"
 SKIP_DEPS="${SKIP_DEPS:-0}"
-LCD_MARKER="/var/lib/omt-encode/lcd_installed"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
 CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
 
@@ -75,28 +72,6 @@ if [[ "$SKIP_DEPS" != "1" ]]; then
   sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
 
-# ── LCD-show ─────────────────────────────────────────────────────────────────
-if [[ "$SKIP_LCD" != "1" ]]; then
-  if sudo test -f "$LCD_MARKER"; then
-    echo "LCD-show already installed (marker found: $LCD_MARKER). Skipping."
-  else
-    if [[ -x "$ROOT_DIR/LCD-show/$LCD_DRIVER" ]]; then
-      echo "Running LCD-show installer ($LCD_DRIVER). This may reboot the device."
-      sudo mkdir -p "$(dirname "$LCD_MARKER")"
-      sudo touch "$LCD_MARKER"
-      ensure_cmdline_flags
-      pushd "$ROOT_DIR/LCD-show" >/dev/null
-      sudo "./$LCD_DRIVER" || true
-      popd >/dev/null
-      echo "LCD step complete. Reboot may happen; re-run this script to continue build steps."
-      exit 0
-    else
-      echo "LCD driver script not found: $ROOT_DIR/LCD-show/$LCD_DRIVER"
-      echo "Set LCD_DRIVER to another script name or set SKIP_LCD=1 to skip."
-    fi
-  fi
-fi
-
 ensure_cmdline_flags
 
 # ── Build ────────────────────────────────────────────────────────────────────
@@ -109,7 +84,7 @@ if ! command -v cargo >/dev/null 2>&1; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-echo "Building omtcapture (release)..."
+echo "Building omtencoder (release)..."
 cd "$ROOT_DIR"
 cargo build --release -p omtencoder
 
@@ -126,13 +101,13 @@ sudo sysctl -p "$SYSCTL_CONF" >/dev/null 2>&1 || true
 # ── Install ──────────────────────────────────────────────────────────────────
 echo "Installing to $INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR"
-sudo cp "$ROOT_DIR/target/release/omtcapture" "$INSTALL_DIR/"
+sudo cp "$ROOT_DIR/target/release/omtencoder" "$INSTALL_DIR/"
 
 if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
-  sudo cp "$ROOT_DIR/omtcapture/config.json" "$INSTALL_DIR/"
+  sudo cp "$ROOT_DIR/omtencoder/config.json" "$INSTALL_DIR/"
 fi
 
-sudo cp "$ROOT_DIR/omtcapture/omtencoder.service" /etc/systemd/system/omtencoder.service
+sudo cp "$ROOT_DIR/omtencoder/omtencoder.service" /etc/systemd/system/omtencoder.service
 sudo systemctl daemon-reload
 sudo systemctl enable omtencoder
 sudo systemctl restart omtencoder
@@ -168,7 +143,7 @@ fi
 cat <<MESSAGE
 
 Install complete.
-- Binary: $INSTALL_DIR/omtcapture
+- Binary: $INSTALL_DIR/omtencoder
 - Config: $INSTALL_DIR/config.json
 - Service: sudo systemctl status omtencoder
 - Logs: journalctl -u omtencoder -f
