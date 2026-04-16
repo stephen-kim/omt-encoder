@@ -1,1 +1,0 @@
-clang++ -O3 -std=c++17 -fdeclspec -fPIC -shared -Wl,-rpath,'$ORIGIN' ../src/vmxcodec_arm.cpp ../src/vmxcodec.cpp -o libvmx.so

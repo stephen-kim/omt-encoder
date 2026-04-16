@@ -1,0 +1,3 @@
+[submodule "libomtnet"]
+	path = libomtnet
+	url = https://github.com/stephen-kim/libomtnet-rs.git
