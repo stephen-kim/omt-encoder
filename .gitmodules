@@ -1,3 +1,6 @@
 [submodule "libomtnet"]
 	path = libomtnet
 	url = https://github.com/stephen-kim/libomtnet-rs.git
+[submodule "libvmx"]
+	path = libvmx
+	url = https://github.com/stephen-kim/libvmx.git
