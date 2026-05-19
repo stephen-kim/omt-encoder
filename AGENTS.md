@@ -16,6 +16,7 @@ cd ~/omt-encoder
 ./build_and_install_service.sh
 ```
 
+- For Orange Pi 5 Plus HDMI RX, use an Orange Pi 5 Plus Armbian image with RK3588 HDMI RX kernel/DTB support. The tested image line is `Armbian_25.8.1_Orangepi5-plus_*_current_6.12.43_*` from `https://armbian.lv.auroradev.org/archive/orangepi5-plus/archive/`.
 - If the repo was cloned without `--recurse-submodules`, run `git submodule update --init --recursive` before building.
 - The systemd service is `omtencoder`; the installed binary is `/opt/omtencoder/omtencoder`.
 - `build_and_install_service.sh` installs/loads Rust via rustup when needed and updates submodules before `cargo build --release -p omtencoder`.

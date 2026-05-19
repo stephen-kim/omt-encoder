@@ -56,10 +56,12 @@ ensure_orangepi_hdmirx_overlay() {
     echo "HDMI RX capture device already present."
     return
   fi
-  if [[ ! -f /etc/default/u-boot ]] || ! command -v u-boot-update >/dev/null 2>&1; then
+  if ! is_orangepi_rk3588; then
     return
   fi
-  if ! is_orangepi_rk3588; then
+  if [[ ! -f /etc/default/u-boot ]] || ! command -v u-boot-update >/dev/null 2>&1; then
+    echo "WARN: HDMI RX is not visible, and this system does not expose Armbian U-Boot overlay config."
+    echo "WARN: Use an Orange Pi 5 Plus Armbian image with RK3588 HDMI RX kernel/DTB support."
     return
   fi
 
