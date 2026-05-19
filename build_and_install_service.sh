@@ -6,6 +6,9 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/omtencoder}"
 SKIP_DEPS="${SKIP_DEPS:-0}"
 CMDLINE_TWEAK="${CMDLINE_TWEAK:-1}"
 CMDLINE_REMOVE_SPLASH="${CMDLINE_REMOVE_SPLASH:-0}"
+CONFIGURE_HDMIRX="${CONFIGURE_HDMIRX:-1}"
+REBOOT_AFTER_HDMIRX_CHANGE="${REBOOT_AFTER_HDMIRX_CHANGE:-0}"
+HDMIRX_REBOOT_REQUIRED=0
 
 CMDLINE_FILE="/boot/firmware/cmdline.txt"
 if [[ ! -f "$CMDLINE_FILE" && -f /boot/cmdline.txt ]]; then
@@ -28,6 +31,85 @@ ensure_cmdline_flags() {
     cmdline="${cmdline// splash/}"
   fi
   echo "$cmdline" | sudo tee "$CMDLINE_FILE" >/dev/null
+}
+
+has_hdmirx_capture_device() {
+  if ! command -v v4l2-ctl >/dev/null 2>&1; then
+    return 1
+  fi
+  v4l2-ctl --list-devices 2>/dev/null | grep -qiE "rk_hdmirx|hdmirx|hdmi rx"
+}
+
+is_orangepi_rk3588() {
+  local model=""
+  if [[ -r /proc/device-tree/model ]]; then
+    model="$(tr -d '\0' </proc/device-tree/model)"
+  fi
+  [[ "$model" == *"Orange Pi 5 Plus"* || "$model" == *"RK3588"* || "$model" == *"rk3588"* ]]
+}
+
+ensure_orangepi_hdmirx_overlay() {
+  if [[ "$CONFIGURE_HDMIRX" != "1" ]]; then
+    return
+  fi
+  if has_hdmirx_capture_device; then
+    echo "HDMI RX capture device already present."
+    return
+  fi
+  if [[ ! -f /etc/default/u-boot ]] || ! command -v u-boot-update >/dev/null 2>&1; then
+    return
+  fi
+  if ! is_orangepi_rk3588; then
+    return
+  fi
+
+  local overlay="device-tree/rockchip/overlay/rk3588-hdmirx.dtbo"
+  if grep -q "rk3588-hdmirx.dtbo" /etc/default/u-boot; then
+    echo "HDMI RX overlay is configured, but the device is not visible yet. A reboot may be required."
+    return
+  fi
+
+  echo "Configuring Orange Pi RK3588 HDMI RX overlay..."
+  sudo cp /etc/default/u-boot "/etc/default/u-boot.bak.$(date +%Y%m%d%H%M%S)"
+  if grep -q '^U_BOOT_FDT_OVERLAYS=' /etc/default/u-boot; then
+    sudo sed -i -E "s|^U_BOOT_FDT_OVERLAYS=\"([^\"]*)\"|U_BOOT_FDT_OVERLAYS=\"\\1 $overlay\"|" /etc/default/u-boot
+    sudo sed -i -E "s|^U_BOOT_FDT_OVERLAYS=([^\"].*)|U_BOOT_FDT_OVERLAYS=\"\\1 $overlay\"|" /etc/default/u-boot
+    sudo sed -i -E 's|U_BOOT_FDT_OVERLAYS=" +|U_BOOT_FDT_OVERLAYS="|' /etc/default/u-boot
+  else
+    echo "U_BOOT_FDT_OVERLAYS=\"$overlay\"" | sudo tee -a /etc/default/u-boot >/dev/null
+  fi
+  sudo u-boot-update
+  HDMIRX_REBOOT_REQUIRED=1
+
+  if [[ "$REBOOT_AFTER_HDMIRX_CHANGE" != "1" ]]; then
+    echo "HDMI RX overlay was added. Reboot this device before expecting /dev/video0 HDMI input."
+  fi
+}
+
+print_capture_device_summary() {
+  echo "Detected V4L2 capture devices:"
+  if ! command -v v4l2-ctl >/dev/null 2>&1; then
+    echo "  v4l2-ctl not installed."
+    return
+  fi
+
+  local found=0
+  while IFS= read -r dev; do
+    [[ -n "$dev" ]] || continue
+    local info
+    info="$(v4l2-ctl --device "$dev" --info 2>/dev/null || true)"
+    if [[ "$info" == *"Device Caps"* && "$info" == *"Video Capture"* && "$info" != *"Memory-to-Memory"* && "$info" != *"Metadata Capture"* ]]; then
+      local card
+      card="$(printf "%s\n" "$info" | sed -n 's/^[[:space:]]*Card type[[:space:]]*:[[:space:]]*//p' | head -n1)"
+      echo "  $dev ${card:+($card)}"
+      found=1
+    fi
+  done < <(find /dev -maxdepth 1 -type c -name 'video*' | sort -V)
+
+  if [[ "$found" = "0" ]]; then
+    echo "  none"
+    echo "  WARN: no usable video capture device is visible."
+  fi
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -72,6 +154,7 @@ if [[ "$SKIP_DEPS" != "1" ]]; then
   sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
 
+ensure_orangepi_hdmirx_overlay
 ensure_cmdline_flags
 
 # ── Build ────────────────────────────────────────────────────────────────────
@@ -144,6 +227,8 @@ if command -v avahi-browse >/dev/null 2>&1; then
   fi
 fi
 
+print_capture_device_summary
+
 cat <<MESSAGE
 
 Install complete.
@@ -152,3 +237,8 @@ Install complete.
 - Service: sudo systemctl status omtencoder
 - Logs: journalctl -u omtencoder -f
 MESSAGE
+
+if [[ "$HDMIRX_REBOOT_REQUIRED" = "1" && "$REBOOT_AFTER_HDMIRX_CHANGE" = "1" ]]; then
+  echo "Rebooting to apply HDMI RX overlay..."
+  sudo reboot
+fi

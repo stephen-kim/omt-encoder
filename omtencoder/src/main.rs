@@ -1,4 +1,5 @@
 mod audio_pipeline;
+mod device_autodetect;
 mod discovery;
 mod send_coordinator;
 mod settings;
@@ -33,7 +34,12 @@ async fn main() -> Result<()> {
 
     // Load or initialize settings
     let config_path = "config.json";
-    let settings = load_settings_with_xml_fallback(config_path);
+    let mut settings = load_settings_with_xml_fallback(config_path);
+    if device_autodetect::apply_startup_autodetect(&mut settings) {
+        if let Err(e) = settings.save(config_path) {
+            eprintln!("Failed to persist autodetected settings: {}", e);
+        }
+    }
 
     let shared_settings = Arc::new(RwLock::new(settings));
     let (settings_tx, mut settings_rx) = watch::channel(shared_settings.read().await.clone());
