@@ -67,7 +67,7 @@ fi
 if [[ "$SKIP_DEPS" != "1" ]]; then
   echo "Installing dependencies..."
   sudo apt update
-  sudo apt install -y git build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev avahi-daemon avahi-utils
+  sudo apt install -y git curl build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev avahi-daemon avahi-utils
   sudo systemctl enable avahi-daemon >/dev/null 2>&1 || true
   sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi
@@ -75,17 +75,21 @@ fi
 ensure_cmdline_flags
 
 # ── Build ────────────────────────────────────────────────────────────────────
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+export PATH="$CARGO_HOME/bin:$PATH"
+
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Rust toolchain not found. Installing via rustup..."
   export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-  export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
   export RUSTUP_INIT_SKIP_PATH_CHECK=1
   curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
-  export PATH="$HOME/.cargo/bin:$PATH"
+  export PATH="$CARGO_HOME/bin:$PATH"
 fi
 
 echo "Building omtencoder (release)..."
 cd "$ROOT_DIR"
+echo "Updating git submodules..."
+git submodule update --init --recursive
 cargo build --release -p omtencoder
 
 # ── Kernel tuning (TCP send buffers for glitch-free audio streaming) ───────

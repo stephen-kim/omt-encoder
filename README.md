@@ -6,16 +6,18 @@ HDMI + TRS 오디오 믹싱, SPI/HDMI 프리뷰, 웹 UI 설정을 지원합니�
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/stephen-kim/omt-encoder.git ~/omt-encoder
+git clone --recurse-submodules https://github.com/stephen-kim/omt-encoder.git ~/omt-encoder
 cd ~/omt-encoder
 chmod +x build_and_install_service.sh
 ./build_and_install_service.sh
 ```
 
-LCD 설치를 건너뛰려면:
+이미 `git clone`을 했다면 서브모듈을 한 번 받아온 뒤 설치하세요:
 
 ```bash
-SKIP_LCD=1 ./build_and_install_service.sh
+cd ~/omt-encoder
+git submodule update --init --recursive
+./build_and_install_service.sh
 ```
 
 스크립트가 의존성 설치, Rust 툴체인 설치, 빌드, systemd 서비스 등록까지 한 번에 처리합니다.
@@ -23,8 +25,8 @@ SKIP_LCD=1 ./build_and_install_service.sh
 ## 서비스 관리
 
 ```bash
-sudo systemctl status omtcapture-rs
-journalctl -u omtcapture-rs -f
+sudo systemctl status omtencoder
+journalctl -u omtencoder -f
 ```
 
 ## 웹 설정 UI

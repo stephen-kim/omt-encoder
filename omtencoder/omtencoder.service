@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 WorkingDirectory=/opt/omtencoder
-ExecStart=/opt/omtencoder/omtcapture
+ExecStart=/opt/omtencoder/omtencoder
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
