@@ -454,16 +454,19 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #000;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .preview-frame img {
-  display: none;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  opacity: 0;
+  pointer-events: none;
 }
-
-.preview-frame.has-preview img { display: block; }
 
 .preview-empty {
   position: absolute;
@@ -1180,23 +1183,36 @@ function formatDuration(epochSecs) {
 
 let previewRefreshInFlight = false;
 let previewObjectUrl = '';
+let previewHasImage = false;
+let previewFailureCount = 0;
+const PREVIEW_FAILURES_BEFORE_CLEAR = 3;
 function setPreviewAvailable(available) {
   const frame = document.getElementById('previewFrame');
   if (frame) frame.classList.toggle('has-preview', available);
 }
 
 function clearPreviewImage() {
+  const frame = document.getElementById('previewFrame');
   const img = document.getElementById('previewImg');
   if (previewObjectUrl) {
     URL.revokeObjectURL(previewObjectUrl);
     previewObjectUrl = '';
   }
+  if (frame) frame.style.backgroundImage = '';
   if (img) {
     img.onload = null;
     img.onerror = null;
     img.removeAttribute('src');
   }
+  previewHasImage = false;
   setPreviewAvailable(false);
+}
+
+function markPreviewUnavailable() {
+  previewFailureCount += 1;
+  if (!previewHasImage || previewFailureCount >= PREVIEW_FAILURES_BEFORE_CLEAR) {
+    clearPreviewImage();
+  }
 }
 
 async function refreshPreviewImage() {
@@ -1205,36 +1221,44 @@ async function refreshPreviewImage() {
   try {
     const res = await fetch('/api/snapshot?' + Date.now(), { cache: 'no-store' });
     if (!res.ok) {
-      clearPreviewImage();
+      markPreviewUnavailable();
       return;
     }
     const blob = await res.blob();
     if (!blob.type.startsWith('image/')) {
-      clearPreviewImage();
+      markPreviewUnavailable();
       return;
     }
 
+    const frame = document.getElementById('previewFrame');
     const img = document.getElementById('previewImg');
-    if (!img) return;
+    if (!frame || !img) return;
     const previousUrl = previewObjectUrl;
     const nextUrl = URL.createObjectURL(blob);
-
-    img.onload = () => {
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
+    try {
+      const preload = new Image();
+      preload.decoding = 'async';
+      await new Promise((resolve, reject) => {
+        preload.onload = resolve;
+        preload.onerror = reject;
+        preload.src = nextUrl;
+      });
+      try {
+        if (preload.decode) await preload.decode();
+      } catch (_) {}
+      frame.style.backgroundImage = `url("${nextUrl}")`;
+      img.src = nextUrl;
       previewObjectUrl = nextUrl;
+      previewHasImage = true;
+      previewFailureCount = 0;
       setPreviewAvailable(true);
-      img.onload = null;
-      img.onerror = null;
-    };
-    img.onerror = () => {
+      if (previousUrl && previousUrl !== nextUrl) URL.revokeObjectURL(previousUrl);
+    } catch (_) {
       URL.revokeObjectURL(nextUrl);
-      img.onload = null;
-      img.onerror = null;
-      clearPreviewImage();
-    };
-    img.src = nextUrl;
+      markPreviewUnavailable();
+    }
   } catch (e) {
-    clearPreviewImage();
+    markPreviewUnavailable();
   } finally {
     previewRefreshInFlight = false;
   }
