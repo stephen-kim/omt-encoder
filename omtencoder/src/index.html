@@ -51,7 +51,7 @@ const I18N = {
     devices: "Devices", audioInputs: "Audio inputs", audioOutputs: "Audio outputs",
     videoDevices: "Video devices", framebuffers: "Framebuffers",
     statCodecs: "Supported Codecs", colIp: "IP", colSignal: "Signal", colQuality: "Quality", colCodec: "Codec", colDuration: "Duration",
-    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients",
+    saved: "Saved", saveFail: "Save failed", refreshed: "Devices refreshed", loadFail: "Load failed", colDevice: "Device", colFormat: "Format", statMem: "Memory", statVideo: "Video", statClients: "Clients", noPreview: "No preview image",
   },
   ko: {
     title: "컨트롤 데크", kicker: "OMT Capture",
@@ -98,7 +98,7 @@ const I18N = {
     devices: "장치", audioInputs: "오디오 입력", audioOutputs: "오디오 출력",
     videoDevices: "비디오 장치", framebuffers: "프레임버퍼",
     statCodecs: "지원 코덱", colIp: "IP", colSignal: "신호", colQuality: "화질", colCodec: "코덱", colDuration: "연결 시간",
-    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트",
+    saved: "저장됨", saveFail: "저장 실패", refreshed: "장치 새로고침 완료", loadFail: "불러오기 실패", colDevice: "장치", colFormat: "형식", statMem: "메모리", statVideo: "비디오", statClients: "클라이언트", noPreview: "프리뷰 이미지 없음",
   },
   ja: {
     title: "コントロールデッキ", kicker: "OMT Capture",
@@ -145,7 +145,7 @@ const I18N = {
     devices: "デバイス", audioInputs: "音声入力", audioOutputs: "音声出力",
     videoDevices: "映像デバイス", framebuffers: "フレームバッファ",
     statCodecs: "対応コーデック", colIp: "IP", colSignal: "信号", colQuality: "画質", colCodec: "コーデック", colDuration: "接続時間",
-    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中",
+    saved: "保存済み", saveFail: "保存に失敗", refreshed: "デバイスを更新しました", loadFail: "読み込みに失敗", colDevice: "デバイス", colFormat: "形式", statMem: "メモリ", statVideo: "映像", statClients: "接続中", noPreview: "プレビュー画像なし",
   },
   es: {
     title: "Panel de Control", kicker: "OMT Capture",
@@ -192,7 +192,7 @@ const I18N = {
     devices: "Dispositivos", audioInputs: "Entradas de audio", audioOutputs: "Salidas de audio",
     videoDevices: "Dispositivos de video", framebuffers: "Framebuffers",
     statCodecs: "Códecs soportados", colIp: "IP", colSignal: "Señal", colQuality: "Calidad", colCodec: "Códec", colDuration: "Duración",
-    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes",
+    saved: "Guardado", saveFail: "Error al guardar", refreshed: "Dispositivos actualizados", loadFail: "Error al cargar", colDevice: "Dispositivo", colFormat: "Formato", statMem: "Memoria", statVideo: "Video", statClients: "Clientes", noPreview: "Sin imagen de vista previa",
   },
 };
 function detectLang() {
@@ -446,6 +446,41 @@ pre {
 
 small { color: var(--muted); display: block; margin-top: 8px; }
 
+.preview-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #000;
+}
+
+.preview-frame img {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.preview-frame.has-preview img { display: block; }
+
+.preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  background: linear-gradient(135deg, rgba(15, 23, 34, 0.92), rgba(8, 12, 18, 0.96));
+}
+
+.preview-frame.has-preview .preview-empty { display: none; }
+
 .check-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .check-row label { margin: 0; font-weight: 600; color: var(--text); }
 .check-grid { display: grid; gap: 8px; margin-top: 8px; }
@@ -547,7 +582,10 @@ small { color: var(--muted); display: block; margin-top: 8px; }
 
   <div class="card" style="display:flex;gap:16px;align-items:stretch;">
     <div style="flex:1;min-width:0;">
-      <img id="previewImg" src="/api/snapshot" decoding="async" style="width:100%;border-radius:8px;background:#000;aspect-ratio:16/9;object-fit:contain;" alt="Preview" />
+      <div id="previewFrame" class="preview-frame">
+        <img id="previewImg" decoding="async" alt="Preview" />
+        <div id="previewEmpty" class="preview-empty" data-i18n="noPreview">No preview image</div>
+      </div>
     </div>
     <div style="display:flex;gap:6px;align-items:flex-end;padding:4px 0;">
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
@@ -1142,22 +1180,49 @@ function formatDuration(epochSecs) {
 
 let previewRefreshInFlight = false;
 let previewObjectUrl = '';
+function setPreviewAvailable(available) {
+  const frame = document.getElementById('previewFrame');
+  if (frame) frame.classList.toggle('has-preview', available);
+}
+
+function clearPreviewImage() {
+  const img = document.getElementById('previewImg');
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = '';
+  }
+  if (img) {
+    img.onload = null;
+    img.onerror = null;
+    img.removeAttribute('src');
+  }
+  setPreviewAvailable(false);
+}
+
 async function refreshPreviewImage() {
   if (previewRefreshInFlight) return;
   previewRefreshInFlight = true;
   try {
     const res = await fetch('/api/snapshot?' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return;
+    if (!res.ok) {
+      clearPreviewImage();
+      return;
+    }
     const blob = await res.blob();
-    if (!blob.type.startsWith('image/')) return;
+    if (!blob.type.startsWith('image/')) {
+      clearPreviewImage();
+      return;
+    }
 
     const img = document.getElementById('previewImg');
+    if (!img) return;
     const previousUrl = previewObjectUrl;
     const nextUrl = URL.createObjectURL(blob);
 
     img.onload = () => {
       if (previousUrl) URL.revokeObjectURL(previousUrl);
       previewObjectUrl = nextUrl;
+      setPreviewAvailable(true);
       img.onload = null;
       img.onerror = null;
     };
@@ -1165,10 +1230,11 @@ async function refreshPreviewImage() {
       URL.revokeObjectURL(nextUrl);
       img.onload = null;
       img.onerror = null;
+      clearPreviewImage();
     };
     img.src = nextUrl;
   } catch (e) {
-    // Keep the last good preview frame visible.
+    clearPreviewImage();
   } finally {
     previewRefreshInFlight = false;
   }
