@@ -67,7 +67,7 @@ fi
 if [[ "$SKIP_DEPS" != "1" ]]; then
   echo "Installing dependencies..."
   sudo apt update
-  sudo apt install -y git curl build-essential clang pkg-config ffmpeg alsa-utils libasound2-dev avahi-daemon avahi-utils
+  sudo apt install -y git curl build-essential clang pkg-config ffmpeg v4l-utils alsa-utils libasound2-dev avahi-daemon avahi-utils
   sudo systemctl enable avahi-daemon >/dev/null 2>&1 || true
   sudo systemctl start avahi-daemon >/dev/null 2>&1 || true
 fi

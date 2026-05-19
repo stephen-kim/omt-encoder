@@ -509,8 +509,8 @@ fn list_video_capture_devices() -> Vec<String> {
         }
     }
 
-    // Check each candidate's Device Caps (not overall Capabilities) for Video Capture.
-    // video1 on Cam Link is Metadata Capture only — must be filtered out.
+    // Check each candidate's Device Caps (not overall Capabilities) for actual capture.
+    // Rockchip codec/RGA nodes are memory-to-memory devices and must not appear as inputs.
     let mut devices = Vec::new();
     for (path, name) in candidates {
         if let Ok(caps) = Command::new("v4l2-ctl")
@@ -522,7 +522,7 @@ fn list_video_capture_devices() -> Vec<String> {
             if let Some(devcaps_start) = info.find("Device Caps") {
                 let devcaps = &info[devcaps_start..];
                 if devcaps.contains("Video Capture")
-                    && !devcaps.contains("Multiplanar")
+                    && !devcaps.contains("Memory-to-Memory")
                     && !devcaps.contains("Metadata Capture")
                 {
                     devices.push(format!("{} ({})", path, name));
@@ -531,9 +531,6 @@ fn list_video_capture_devices() -> Vec<String> {
         }
     }
 
-    if devices.is_empty() {
-        return list_all_dev_entries("/dev", "video");
-    }
     devices
 }
 
