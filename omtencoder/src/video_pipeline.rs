@@ -195,6 +195,40 @@ mod linux {
         header_skipped: bool,
     }
 
+    enum CaptureSource<'a> {
+        V4l { stream: MmapStream<'a> },
+        Ffmpeg(FfmpegCapture),
+    }
+
+    struct FfmpegCapture {
+        child: Child,
+        stdout: ChildStdout,
+        frame_buf: Vec<u8>,
+    }
+
+    impl Drop for FfmpegCapture {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    impl<'a> CaptureSource<'a> {
+        fn next_frame(&mut self) -> Result<Bytes, String> {
+            match self {
+                CaptureSource::V4l { stream } => stream
+                    .next()
+                    .map(|(data, _)| Bytes::copy_from_slice(data))
+                    .map_err(|e| e.to_string()),
+                CaptureSource::Ffmpeg(capture) => {
+                    read_exact(&mut capture.stdout, &mut capture.frame_buf)
+                        .then(|| Bytes::copy_from_slice(&capture.frame_buf))
+                        .ok_or_else(|| "ffmpeg capture stdout ended".to_string())
+                }
+            }
+        }
+    }
+
     impl HwEncoderContext {
         fn start(
             input_pix_fmt: &str,
@@ -396,49 +430,39 @@ mod linux {
             }
         };
 
+        let desired_codec = parse_codec(&settings.codec).unwrap_or(OMTCodec::YUY2);
+        let desired_pix_fmt = codec_to_pix_fmt(desired_codec);
+        let desired_fourcc = codec_to_fourcc(desired_codec);
+
         // Set the desired capture format explicitly. Without this, V4L2 may default to the
         // smallest resolution the device supports (e.g. 720x576 instead of 1920x1080).
-        {
-            let desired_fourcc = match settings.codec.to_ascii_uppercase().as_str() {
-                "UYVY" => FourCC::new(b"UYVY"),
-                "NV12" => FourCC::new(b"NV12"),
-                "YV12" | "YU12" => FourCC::new(b"YU12"),
-                "BGRA" => FourCC::new(b"BGRA"),
-                _ => FourCC::new(b"YUYV"),
-            };
-            if let Ok(mut current_fmt) = dev.format() {
-                current_fmt.width = settings.width.max(1);
-                current_fmt.height = settings.height.max(1);
-                current_fmt.fourcc = desired_fourcc;
-                match dev.set_format(&current_fmt) {
-                    Ok(actual) => {
-                        println!(
-                            "V4L2 format set: requested {}x{} {:?}, got {}x{} {:?}",
-                            settings.width, settings.height, desired_fourcc,
-                            actual.width, actual.height, actual.fourcc
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: failed to set V4L2 format: {}", e);
-                    }
+        let mut v4l_fmt = dev.format().ok();
+        if let Some(mut current_fmt) = v4l_fmt {
+            current_fmt.width = settings.width.max(1);
+            current_fmt.height = settings.height.max(1);
+            current_fmt.fourcc = desired_fourcc;
+            match dev.set_format(&current_fmt) {
+                Ok(actual) => {
+                    println!(
+                        "V4L2 format set: requested {}x{} {:?}, got {}x{} {:?}",
+                        settings.width, settings.height, desired_fourcc,
+                        actual.width, actual.height, actual.fourcc
+                    );
+                    v4l_fmt = Some(actual);
+                }
+                Err(e) => {
+                    eprintln!("Warning: failed to set V4L2 format: {}", e);
+                    v4l_fmt = dev.format().ok();
                 }
             }
         }
-
-        let fmt = match dev.format() {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("Failed to read device format: {}", e);
-                return;
-            }
-        };
 
         let mut input_rate_n = settings.frame_rate_n.max(1);
         let mut input_rate_d = settings.frame_rate_d.max(1);
 
         // Try to set capture frame interval (fps). Some devices ignore this, but when supported
         // it can reduce internal buffering and stabilize capture timing.
-        if settings.frame_rate_n > 0 {
+        if v4l_fmt.is_some() && settings.frame_rate_n > 0 {
             let interval =
                 Fraction::new(settings.frame_rate_d.max(1), settings.frame_rate_n.max(1));
             let params = CaptureParameters::new(interval);
@@ -446,23 +470,55 @@ mod linux {
                 eprintln!("Warning: failed to set V4L2 capture params (fps): {}", e);
             }
         }
-        if let Ok(params) = dev.params() {
-            if params.interval.numerator > 0 && params.interval.denominator > 0 {
-                // v4l interval is time-per-frame (num/den sec), fps = den/num
-                input_rate_n = params.interval.denominator;
-                input_rate_d = params.interval.numerator;
+        if v4l_fmt.is_some() {
+            if let Ok(params) = dev.params() {
+                if params.interval.numerator > 0 && params.interval.denominator > 0 {
+                    // v4l interval is time-per-frame (num/den sec), fps = den/num
+                    input_rate_n = params.interval.denominator;
+                    input_rate_d = params.interval.numerator;
+                }
             }
         }
 
-        let input_width = fmt.width;
-        let input_height = fmt.height;
-        let input_fourcc = fmt.fourcc;
-        let input_codec = fourcc_to_codec(input_fourcc);
-        let input_pix_fmt = codec_to_pix_fmt(input_codec);
-        let input_frame_bytes = frame_size_bytes(input_codec, input_width, input_height);
+        let mut source: CaptureSource<'_>;
+        let (input_width, input_height, input_fourcc, input_codec, input_stride) =
+            if let Some(fmt) = v4l_fmt {
+                let input_codec = fourcc_to_codec(fmt.fourcc);
+                let stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 2) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to create video stream: {}", e);
+                        return;
+                    }
+                };
+                source = CaptureSource::V4l { stream };
+                (fmt.width, fmt.height, fmt.fourcc, input_codec, fmt.stride)
+            } else {
+                eprintln!(
+                    "V4L2 single-plane format query failed; using ffmpeg capture fallback for {}.",
+                    settings.device_path
+                );
+                let width = settings.width.max(1);
+                let height = settings.height.max(1);
+                let capture =
+                    match start_ffmpeg_capture(&settings, desired_pix_fmt, width, height) {
+                        Ok(capture) => capture,
+                        Err(e) => {
+                            eprintln!("Failed to start ffmpeg capture fallback: {}", e);
+                            return;
+                        }
+                    };
+                source = CaptureSource::Ffmpeg(capture);
+                (
+                    width,
+                    height,
+                    desired_fourcc,
+                    desired_codec,
+                    codec_stride(desired_codec, width),
+                )
+            };
 
-        let desired_codec = parse_codec(&settings.codec).unwrap_or(OMTCodec::YUY2);
-        let desired_pix_fmt = codec_to_pix_fmt(desired_codec);
+        let input_pix_fmt = codec_to_pix_fmt(input_codec);
 
         let use_native = settings.use_native_format;
         let output_codec = if use_native {
@@ -552,17 +608,7 @@ mod linux {
         let _encode_stride = if transform.is_some() {
             codec_stride(encode_codec, encode_width)
         } else {
-            fmt.stride
-        };
-
-        // Fewer kernel-side buffers reduces capture->send latency.
-        // 2 is usually safe at 1080p30 on Pi-class hardware; increase if you see V4L2 overruns.
-        let mut stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 2) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to create video stream: {}", e);
-                return;
-            }
+            input_stride
         };
 
         let mut preview_sinks = {
@@ -684,10 +730,10 @@ mod linux {
             // Quality-level switching is handled by per-quality VMX instances.
             // No need to recreate the default instance.
 
-            let (raw_data, _) = match stream.next() {
-                Ok(res) => {
+            let raw_data = match source.next_frame() {
+                Ok(frame) => {
                     consecutive_capture_errors = 0;
-                    res
+                    frame
                 }
                 Err(e) => {
                     eprintln!("Failed to read video frame: {}", e);
@@ -755,7 +801,7 @@ mod linux {
                         input_codec,
                         input_width,
                         input_height,
-                        fmt.stride,
+                        input_stride,
                     )
                 };
 
@@ -1063,7 +1109,6 @@ mod linux {
         // Stop preview workers.
         stop_preview_sinks(&mut preview_sinks);
 
-        let _ = input_frame_bytes;
     }
 
     fn stop_preview_sinks(preview_sinks: &mut [PreviewSink]) {
@@ -1162,6 +1207,73 @@ mod linux {
             OMTCodec::PA16 => width * 4,
             _ => width * 2,
         }
+    }
+
+    fn start_ffmpeg_capture(
+        settings: &VideoSettings,
+        output_pix_fmt: &str,
+        output_width: u32,
+        output_height: u32,
+    ) -> Result<FfmpegCapture, String> {
+        let rate = if settings.frame_rate_n == 0 {
+            "30".to_string()
+        } else {
+            format!("{}/{}", settings.frame_rate_n, settings.frame_rate_d.max(1))
+        };
+        let frame_size = frame_size_bytes(
+            pix_fmt_to_codec(output_pix_fmt).unwrap_or(OMTCodec::YUY2),
+            output_width,
+            output_height,
+        );
+        let filter = format!(
+            "fps={},scale={}:{}:flags=fast_bilinear",
+            rate, output_width, output_height
+        );
+
+        println!(
+            "Starting ffmpeg V4L2 capture fallback: {} -> {}x{} {} @ {}",
+            settings.device_path, output_width, output_height, output_pix_fmt, rate
+        );
+
+        let mut child = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-fflags",
+                "nobuffer",
+                "-f",
+                "v4l2",
+                "-framerate",
+                &rate,
+                "-video_size",
+                &format!("{}x{}", output_width, output_height),
+                "-i",
+                &settings.device_path,
+                "-an",
+                "-vf",
+                &filter,
+                "-pix_fmt",
+                output_pix_fmt,
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("ffmpeg spawn: {}", e))?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "ffmpeg stdout unavailable".to_string())?;
+
+        Ok(FfmpegCapture {
+            child,
+            stdout,
+            frame_buf: vec![0u8; frame_size],
+        })
     }
 
     fn start_transform(
@@ -1602,6 +1714,16 @@ mod linux {
             "UYVA" => OMTCodec::UYVA,
             "BGRA" => OMTCodec::BGRA,
             _ => OMTCodec::UYVY,
+        }
+    }
+
+    fn codec_to_fourcc(codec: OMTCodec) -> FourCC {
+        match codec {
+            OMTCodec::UYVY => FourCC::new(b"UYVY"),
+            OMTCodec::NV12 => FourCC::new(b"NV12"),
+            OMTCodec::YV12 => FourCC::new(b"YU12"),
+            OMTCodec::BGRA => FourCC::new(b"BGRA"),
+            _ => FourCC::new(b"YUYV"),
         }
     }
 
