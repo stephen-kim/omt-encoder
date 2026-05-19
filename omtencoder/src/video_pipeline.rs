@@ -797,7 +797,7 @@ mod linux {
                     )
                 } else {
                     (
-                        Bytes::copy_from_slice(raw_data),
+                        raw_data.clone(),
                         input_codec,
                         input_width,
                         input_height,
@@ -1077,7 +1077,7 @@ mod linux {
                     }
                 }
                 if should_make_preview {
-                    let preview_bytes = Bytes::copy_from_slice(raw_data);
+                    let preview_bytes = raw_data.clone();
                     for sink in preview_sinks.iter_mut() {
                         if sink.interval_ms != 0
                             && (now.duration_since(sink.last_sent).as_millis() as u64)
