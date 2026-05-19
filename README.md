@@ -12,14 +12,6 @@ chmod +x build_and_install_service.sh
 ./build_and_install_service.sh
 ```
 
-이미 `git clone`을 했다면 서브모듈을 한 번 받아온 뒤 설치하세요:
-
-```bash
-cd ~/omt-encoder
-git submodule update --init --recursive
-./build_and_install_service.sh
-```
-
 스크립트가 의존성 설치, Rust 툴체인 설치, 빌드, systemd 서비스 등록까지 한 번에 처리합니다.
 
 ## 서비스 관리
