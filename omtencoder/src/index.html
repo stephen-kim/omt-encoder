@@ -547,7 +547,7 @@ small { color: var(--muted); display: block; margin-top: 8px; }
 
   <div class="card" style="display:flex;gap:16px;align-items:stretch;">
     <div style="flex:1;min-width:0;">
-      <img id="previewImg" src="/api/snapshot" style="width:100%;border-radius:8px;background:#000;aspect-ratio:16/9;object-fit:contain;" alt="Preview" />
+      <img id="previewImg" src="/api/snapshot" decoding="async" style="width:100%;border-radius:8px;background:#000;aspect-ratio:16/9;object-fit:contain;" alt="Preview" />
     </div>
     <div style="display:flex;gap:6px;align-items:flex-end;padding:4px 0;">
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
@@ -1139,6 +1139,41 @@ function formatDuration(epochSecs) {
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
 }
+
+let previewRefreshInFlight = false;
+let previewObjectUrl = '';
+async function refreshPreviewImage() {
+  if (previewRefreshInFlight) return;
+  previewRefreshInFlight = true;
+  try {
+    const res = await fetch('/api/snapshot?' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) return;
+
+    const img = document.getElementById('previewImg');
+    const previousUrl = previewObjectUrl;
+    const nextUrl = URL.createObjectURL(blob);
+
+    img.onload = () => {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      previewObjectUrl = nextUrl;
+      img.onload = null;
+      img.onerror = null;
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(nextUrl);
+      img.onload = null;
+      img.onerror = null;
+    };
+    img.src = nextUrl;
+  } catch (e) {
+    // Keep the last good preview frame visible.
+  } finally {
+    previewRefreshInFlight = false;
+  }
+}
+
 async function refreshStats() {
   try {
     const res = await fetch('/api/stats');
@@ -1157,8 +1192,7 @@ async function refreshStats() {
     const meterColor = pct => pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--accent)' : 'var(--accent-3)';
     document.getElementById('meterLBar').style.background = meterColor(lPct);
     document.getElementById('meterRBar').style.background = meterColor(rPct);
-    // Refresh preview image
-    document.getElementById('previewImg').src = '/api/snapshot?' + Date.now();
+    refreshPreviewImage();
     const conns = s.connections || [];
     const byAddr = {};
     conns.forEach(c => {
