@@ -92,11 +92,11 @@ impl SendCoordinator {
     #[allow(dead_code)]
     pub fn send_video_quality(&self, frame: OMTFrame, quality: u8) {
         let mut stamped = frame;
-        stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
-            0
-        } else {
-            crate::timebase::presentation_100ns()
-        };
+        if self.inner.settings.force_zero_timestamps {
+            stamped.header.timestamp = 0;
+        } else if stamped.header.timestamp == 0 {
+            stamped.header.timestamp = crate::timebase::presentation_100ns();
+        }
         let result = match quality {
             1 => self.inner.tx.video_lq.send(stamped),
             2 => self.inner.tx.video_sq.send(stamped),
@@ -112,11 +112,11 @@ impl SendCoordinator {
     #[allow(dead_code)]
     pub fn send_video_codec(&self, frame: OMTFrame, codec: libomtnet::OMTCodec) {
         let mut stamped = frame;
-        stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
-            0
-        } else {
-            crate::timebase::presentation_100ns()
-        };
+        if self.inner.settings.force_zero_timestamps {
+            stamped.header.timestamp = 0;
+        } else if stamped.header.timestamp == 0 {
+            stamped.header.timestamp = crate::timebase::presentation_100ns();
+        }
         let _ = match codec {
             libomtnet::OMTCodec::H264 => self.inner.tx.video_h264.send(stamped),
             libomtnet::OMTCodec::H265 => self.inner.tx.video_h265.send(stamped),

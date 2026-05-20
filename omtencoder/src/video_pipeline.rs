@@ -747,6 +747,7 @@ mod linux {
                     continue;
                 }
             };
+            let capture_timestamp = crate::timebase::presentation_100ns();
             if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
                 break;
             }
@@ -870,6 +871,7 @@ mod linux {
                                 None
                             };
                             let mut qframe = OMTFrame::new(OMTFrameType::Video);
+                            qframe.header.timestamp = capture_timestamp;
                             qframe.video_header = Some(OMTVideoHeader {
                                 codec: OMTCodec::VMX1 as i32,
                                 width: frame_width as i32,
@@ -907,6 +909,7 @@ mod linux {
                     if enc.stdin.write_all(&raw_payload).is_ok() {
                         if let Some(compressed) = enc.read_frame() {
                             let mut f = OMTFrame::new(OMTFrameType::Video);
+                            f.header.timestamp = capture_timestamp;
                             f.video_header = Some(OMTVideoHeader {
                                 codec: OMTCodec::H264 as i32,
                                 width: frame_width as i32, height: frame_height as i32,
@@ -942,6 +945,7 @@ mod linux {
                     if enc.stdin.write_all(&raw_payload).is_ok() {
                         if let Some(compressed) = enc.read_frame() {
                             let mut f = OMTFrame::new(OMTFrameType::Video);
+                            f.header.timestamp = capture_timestamp;
                             f.video_header = Some(OMTVideoHeader {
                                 codec: OMTCodec::H265 as i32,
                                 width: frame_width as i32, height: frame_height as i32,
