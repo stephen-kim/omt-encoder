@@ -636,9 +636,12 @@ mod linux {
         let mut fps_window_start = Instant::now();
         let mut fps_window_frames: usize = 0;
         let mut consecutive_capture_errors: u32 = 0;
-        let mut throttle_fps = !use_native
-            && (input_rate_n as u64 * effective_output_rate_d as u64
-                > effective_output_rate_n as u64 * input_rate_d as u64);
+        let mut throttle_fps = if use_native {
+            settings.frame_rate_n > 0 && effective_output_rate_n > 0
+        } else {
+            input_rate_n as u64 * effective_output_rate_d as u64
+                > effective_output_rate_n as u64 * input_rate_d as u64
+        };
         if needs_transform && transform.is_none() {
             // Match C# behavior: when transform failed and we fall back to native format,
             // disable software FPS throttling.
@@ -1328,14 +1331,10 @@ mod linux {
         );
 
         let video_size = format!("{}x{}", output_width, output_height);
-        let filter = if settings.use_native_format {
-            format!("fps={}", rate)
-        } else {
-            format!(
-                "fps={},scale={}:{}:flags=fast_bilinear",
-                rate, output_width, output_height
-            )
-        };
+        let filter = format!(
+            "fps={},scale={}:{}:flags=fast_bilinear",
+            rate, output_width, output_height
+        );
         let mut args = vec![
             "-hide_banner".to_string(),
             "-loglevel".to_string(),
@@ -1358,8 +1357,10 @@ mod linux {
             settings.device_path.clone(),
             "-an".to_string(),
         ]);
-        args.push("-vf".to_string());
-        args.push(filter);
+        if !settings.use_native_format {
+            args.push("-vf".to_string());
+            args.push(filter);
+        }
         args.extend([
             "-pix_fmt".to_string(),
             output_pix_fmt.to_string(),
