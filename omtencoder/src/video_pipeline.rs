@@ -1591,7 +1591,10 @@ mod linux {
                     preview_width, preview_height, preview_format
                 )
             };
-            let frame_bytes = preview_width as usize * preview_height as usize * 2;
+            let frame_bytes =
+                raw_frame_size(preview_width, preview_height, &preview_format).unwrap_or_else(
+                    || preview_width as usize * preview_height as usize * 2,
+                );
 
             // Outer loop: restart ffmpeg on failure.
             loop {
@@ -1741,6 +1744,17 @@ mod linux {
             return None;
         }
         Some((width, height))
+    }
+
+    fn raw_frame_size(width: u32, height: u32, pixel_format: &str) -> Option<usize> {
+        let pixels = width as usize * height as usize;
+        match pixel_format {
+            "rgb565le" | "yuyv422" | "uyvy422" => Some(pixels * 2),
+            "bgra" | "rgba" | "argb" | "abgr" => Some(pixels * 4),
+            "rgb24" | "bgr24" => Some(pixels * 3),
+            "nv12" | "yuv420p" => Some(pixels * 3 / 2),
+            _ => None,
+        }
     }
 
     #[allow(dead_code)]
