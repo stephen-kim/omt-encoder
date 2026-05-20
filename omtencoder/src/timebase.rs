@@ -20,7 +20,7 @@ pub fn monotonic_100ns() -> i64 {
 /// buffers. A small future lead gives OBS room to absorb occasional scheduler
 /// or network jitter instead of underrunning the audio buffer.
 pub fn presentation_100ns() -> i64 {
-    const OBS_JITTER_LEAD_100NS: i64 = 2_000_000; // 200ms
+    const OBS_JITTER_LEAD_100NS: i64 = 6_000_000; // 600ms
     monotonic_100ns().saturating_add(OBS_JITTER_LEAD_100NS)
 }
 
