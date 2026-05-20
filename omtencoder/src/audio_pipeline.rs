@@ -641,6 +641,7 @@ mod linux {
                         &mut monitor_write_buf,
                     ) {
                         pcm_monitor = None;
+                        eprintln!("Monitor output write failed; reopening playback device");
                         pending.clear();
                         break;
                     }
@@ -762,17 +763,19 @@ mod linux {
     }
 
     fn build_device_candidates(device: &str, include_default: bool) -> Vec<String> {
-        let mut candidates = vec![device.to_string()];
+        let mut candidates = Vec::new();
+        if let Some((card_name, dev)) = parse_alsa_named_device(device) {
+            candidates.push(format!("hw:CARD={card_name},DEV={dev}"));
+            if let Some(card_num) = resolve_alsa_card_number(&card_name) {
+                candidates.push(format!("hw:{card_num},{dev}"));
+                candidates.push(format!("plughw:{card_num},{dev}"));
+                candidates.push(format!("plug:hw:{card_num},{dev}"));
+            }
+        }
+        candidates.push(device.to_string());
         if let Some(suffix) = device.strip_prefix("hw:") {
             candidates.push(format!("plughw:{suffix}"));
             candidates.push(format!("plug:hw:{suffix}"));
-        }
-        if let Some((card_name, dev)) = parse_alsa_named_device(device) {
-            if let Some(card_num) = resolve_alsa_card_number(&card_name) {
-                candidates.push(format!("plughw:{card_num},{dev}"));
-                candidates.push(format!("hw:{card_num},{dev}"));
-                candidates.push(format!("plug:hw:{card_num},{dev}"));
-            }
         }
         // For monitor playback we can safely try generic fallbacks.
         // For capture inputs (HDMI/TRS), keep routing deterministic and do not silently
@@ -972,6 +975,24 @@ mod linux {
         period_usec: u32,
         nonblock: bool,
     ) -> Result<AlsaOutput, alsa::Error> {
+        if let Ok(pcm) = PCM::new(device, Direction::Playback, nonblock) {
+            if apply_hw_params(
+                &pcm,
+                rate,
+                channels,
+                buffer_usec,
+                period_usec,
+                SampleFormat::S16,
+            )
+            .is_ok()
+            {
+                return Ok(AlsaOutput {
+                    pcm,
+                    format: SampleFormat::S16,
+                });
+            }
+        }
+
         if let Ok(pcm) = PCM::new(device, Direction::Playback, nonblock) {
             if apply_hw_params(
                 &pcm,
