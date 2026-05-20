@@ -1328,10 +1328,14 @@ mod linux {
         );
 
         let video_size = format!("{}x{}", output_width, output_height);
-        let filter = format!(
-            "fps={},scale={}:{}:flags=fast_bilinear",
-            rate, output_width, output_height
-        );
+        let filter = if settings.use_native_format {
+            format!("fps={}", rate)
+        } else {
+            format!(
+                "fps={},scale={}:{}:flags=fast_bilinear",
+                rate, output_width, output_height
+            )
+        };
         let mut args = vec![
             "-hide_banner".to_string(),
             "-loglevel".to_string(),
@@ -1354,10 +1358,8 @@ mod linux {
             settings.device_path.clone(),
             "-an".to_string(),
         ]);
-        if !settings.use_native_format {
-            args.push("-vf".to_string());
-            args.push(filter);
-        }
+        args.push("-vf".to_string());
+        args.push(filter);
         args.extend([
             "-pix_fmt".to_string(),
             output_pix_fmt.to_string(),
