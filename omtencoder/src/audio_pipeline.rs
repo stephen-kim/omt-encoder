@@ -263,11 +263,13 @@ mod linux {
         let mut consecutive_silence: u32 = 0;
         let mut silence_events: u64 = 0;
         let mut audio_timestamp: i64 = 0;
+        let frame_duration_ms = (frame_size as u64 * 1000 / effective_rate.max(1) as u64).max(1);
+        let slow_audio_loop_ms = (frame_duration_ms + 10).max(20);
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Diagnostics: log timing anomalies (stderr to avoid stdout lock contention).
             let iter_elapsed = loop_start.elapsed();
-            if iter_elapsed.as_millis() > 20 && frame_counter > 10 {
+            if iter_elapsed.as_millis() > slow_audio_loop_ms as u128 && frame_counter > 10 {
                 eprintln!(
                     "AUDIO DIAG: loop iteration took {}ms (frame {})",
                     iter_elapsed.as_millis(),
@@ -378,7 +380,7 @@ mod linux {
                 Ok(0)
             };
             let read_elapsed = read_start.elapsed();
-            if read_elapsed.as_millis() > 20 {
+            if read_elapsed.as_millis() > slow_audio_loop_ms as u128 {
                 slow_read_count += 1;
                 eprintln!(
                     "AUDIO DIAG: read_pcm took {}ms (frame {})",
