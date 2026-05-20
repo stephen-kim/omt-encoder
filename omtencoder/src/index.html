@@ -873,6 +873,27 @@ function parseAlsaDevices(text, preferPlug) {
   return devices;
 }
 
+function parseAlsaDeviceRef(value) {
+  const text = (value || '').trim();
+  let m = text.match(/^(?:plug)?hw:(\d+),(\d+)$/);
+  if (m) return { card: m[1], device: m[2], name: '' };
+  m = text.match(/^(?:plug)?hw:CARD=([^,]+),DEV=(\d+)$/);
+  if (m) return { card: '', device: m[2], name: m[1] };
+  return null;
+}
+
+function alsaDeviceMatches(left, right) {
+  if (!left || !right) return false;
+  if (left.value === right) return true;
+  const a = parseAlsaDeviceRef(left.value);
+  const b = parseAlsaDeviceRef(right);
+  if (!a || !b) return false;
+  if (a.device !== b.device) return false;
+  if (a.card && b.card) return a.card === b.card;
+  if (a.name && b.name) return a.name === b.name;
+  return false;
+}
+
 async function buildFramebufferOptions(framebuffers) {
   const options = [];
   for (const fb of framebuffers) {
@@ -1001,7 +1022,10 @@ async function loadDevices(showToast) {
   if (!monitorDevice || monitorDevice === 'default') {
     monitorDevice = outputs.length ? outputs[0].value : 'default';
   }
-  if (monitorDevice && !outputs.some(o => o.value === monitorDevice)) {
+  const matchingMonitor = outputs.find(o => alsaDeviceMatches(o, monitorDevice));
+  if (matchingMonitor) {
+    monitorDevice = matchingMonitor.value;
+  } else if (monitorDevice) {
     outputs.unshift({ value: monitorDevice, label: monitorDevice });
   }
   setSelectOptions('monitorDevice', outputs, monitorDevice);
