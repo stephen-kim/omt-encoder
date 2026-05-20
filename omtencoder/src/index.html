@@ -464,16 +464,19 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   height: 100%;
   object-fit: contain;
   opacity: 0;
+  z-index: 1;
   pointer-events: none;
-  transition: opacity 120ms linear;
-  will-change: opacity;
 }
 
-.preview-frame img.active { opacity: 1; }
+.preview-frame img.active {
+  opacity: 1;
+  z-index: 2;
+}
 
 .preview-empty {
   position: absolute;
   inset: 0;
+  z-index: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1233,7 +1236,7 @@ let previewObjectUrls = ['', ''];
 let previewActiveLayer = 0;
 let previewHasImage = false;
 let previewFailureCount = 0;
-const PREVIEW_FAILURES_BEFORE_CLEAR = 3;
+const PREVIEW_FAILURES_BEFORE_CLEAR = 10;
 function setPreviewAvailable(available) {
   const frame = document.getElementById('previewFrame');
   if (frame) frame.classList.toggle('has-preview', available);
@@ -1247,6 +1250,7 @@ function clearPreviewImage() {
   for (const img of getPreviewLayers()) {
     img.onload = null;
     img.onerror = null;
+    img.style.zIndex = '';
     img.removeAttribute('src');
     img.classList.remove('active');
   }
@@ -1279,6 +1283,10 @@ async function loadPreviewLayer(img, url) {
   } catch (_) {}
 }
 
+function nextPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
 async function refreshPreviewImage() {
   if (previewRefreshInFlight) return;
   previewRefreshInFlight = true;
@@ -1305,18 +1313,26 @@ async function refreshPreviewImage() {
     const nextUrl = URL.createObjectURL(blob);
     try {
       await loadPreviewLayer(nextImg, nextUrl);
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      nextImg.style.zIndex = '3';
       nextImg.classList.add('active');
-      if (previewHasImage && prevImg && prevImg !== nextImg) {
-        prevImg.classList.remove('active');
-      }
+      await nextPaint();
+      const hadPreview = previewHasImage;
       previewObjectUrls[nextLayer] = nextUrl;
       previewActiveLayer = nextLayer;
       previewHasImage = true;
       previewFailureCount = 0;
       setPreviewAvailable(true);
+      if (hadPreview && prevImg && prevImg !== nextImg) {
+        setTimeout(() => {
+          prevImg.classList.remove('active');
+          prevImg.style.zIndex = '';
+          nextImg.style.zIndex = '';
+        }, 250);
+      } else {
+        nextImg.style.zIndex = '';
+      }
       if (previousUrl && previousUrl !== nextUrl) {
-        setTimeout(() => URL.revokeObjectURL(previousUrl), 500);
+        setTimeout(() => URL.revokeObjectURL(previousUrl), 1000);
       }
     } catch (_) {
       URL.revokeObjectURL(nextUrl);
