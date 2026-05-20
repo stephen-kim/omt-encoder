@@ -22,7 +22,7 @@
     "restart_after_failed_reads": 5,
     "restart_cooldown_ms": 1000,
     "monitor": {
-      "enabled": true,
+      "enabled": false,
       "device": "default",
       "gain": 1.0
     }

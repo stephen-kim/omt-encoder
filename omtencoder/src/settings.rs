@@ -51,7 +51,7 @@ pub struct MonitorSettings {
 impl Default for MonitorSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             device: "default".to_string(),
             gain: 1.0,
         }

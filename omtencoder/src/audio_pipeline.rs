@@ -974,19 +974,22 @@ mod linux {
             }
         }
 
-        // Final fallback: start `aplay` process in S16 mode.
-        for dev in build_device_candidates(&settings.monitor.device, true) {
-            for rate in &rate_candidates {
-                for ch in &channel_candidates {
-                    match open_aplay_output(&dev, *rate, *ch as usize) {
-                        Ok(out) => {
-                            println!(
-                                "Monitor output opened via aplay on {} (rate={}, channels={})",
-                                dev, rate, ch
-                            );
-                            return Ok(MonitorOutput::Aplay(out));
+        // `aplay` is a best-effort fallback only. Keep it opt-in because a device
+        // that exits quickly can cause periodic process churn and audible monitor gaps.
+        if std::env::var("OMT_MONITOR_APLAY_FALLBACK").as_deref() == Ok("1") {
+            for dev in build_device_candidates(&settings.monitor.device, true) {
+                for rate in &rate_candidates {
+                    for ch in &channel_candidates {
+                        match open_aplay_output(&dev, *rate, *ch as usize) {
+                            Ok(out) => {
+                                println!(
+                                    "Monitor output opened via aplay on {} (rate={}, channels={})",
+                                    dev, rate, ch
+                                );
+                                return Ok(MonitorOutput::Aplay(out));
+                            }
+                            Err(e) => last_err = Some(e),
                         }
-                        Err(e) => last_err = Some(e),
                     }
                 }
             }
