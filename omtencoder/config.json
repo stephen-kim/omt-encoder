@@ -15,10 +15,10 @@
     "trs_device": "",
     "sample_rate": 48000,
     "channels": 2,
-    "samples_per_channel": 480,
+    "samples_per_channel": 1920,
     "mix_gain": 1.0,
-    "arecord_buffer_usec": 100000,
-    "arecord_period_usec": 20000,
+    "arecord_buffer_usec": 200000,
+    "arecord_period_usec": 40000,
     "restart_after_failed_reads": 5,
     "restart_cooldown_ms": 1000,
     "monitor": {
