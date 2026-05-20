@@ -682,6 +682,17 @@ small { color: var(--muted); display: block; margin-top: 8px; }
         <label><span data-i18n="mixGain">Mix gain:</span> <span id="gainDisplay"></span></label>
         <input id="audioMixGain" type="range" min="0" max="10" step="0.1" oninput="document.getElementById('gainDisplay').innerText = this.value" onchange="saveConfig()" />
         <div class="help" data-i18n="gainHelp">Applied after mixing HDMI/TRS inputs.</div>
+
+        <div class="section-label" style="margin-top:14px;" data-i18n="monitorOutput">Monitor output</div>
+        <div class="check-row">
+          <input id="monitorEnabled" type="checkbox" onchange="saveConfig()" />
+          <label for="monitorEnabled" data-i18n="monitorEnabled">Monitor enabled</label>
+        </div>
+        <label data-i18n="monitorDevice">Monitor device</label>
+        <select id="monitorDevice" onchange="saveConfig()"></select>
+        <label><span data-i18n="monitorGain">Monitor gain:</span> <span id="monitorGainDisplay"></span></label>
+        <input id="monitorGain" type="range" min="0" max="4" step="0.1" oninput="document.getElementById('monitorGainDisplay').innerText = this.value" onchange="saveConfig()" />
+        <div class="help" data-i18n="monitorHelp">Applies only to the local monitor output.</div>
       </div>
 
       <div class="card">
@@ -837,7 +848,7 @@ function limitAudioInputs() {
   });
 }
 
-function parseAlsaDevices(text) {
+function parseAlsaDevices(text, preferPlug) {
   const lines = text.split('\n');
   const devices = [];
   const regex = /card\s+(\d+):\s*([^,]+),\s*device\s+(\d+):\s*([^[]+)/i;
@@ -847,9 +858,10 @@ function parseAlsaDevices(text) {
       const card = match[1];
       const device = match[3];
       const name = match[2].trim();
-      let value = `hw:${card},${device}`;
+      const prefix = preferPlug ? 'plughw' : 'hw';
+      let value = `${prefix}:${card},${device}`;
       if (/^[a-zA-Z0-9_\-]+$/.test(name)) {
-          value = `hw:CARD=${name},DEV=${device}`;
+          value = `${prefix}:CARD=${name},DEV=${device}`;
       }
       const devLabel = `${name} (Card ${card}, Dev ${device})`;
       devices.push({ value: value, label: devLabel });
@@ -975,7 +987,7 @@ async function loadDevices(showToast) {
   document.getElementById('framebuffers').innerText = data.framebuffers.join('\n');
 
   const inputs = parseAlsaDevices(data.audioInputs);
-  const outputs = parseAlsaDevices(data.audioOutputs);
+  const outputs = parseAlsaDevices(data.audioOutputs, true);
   const videoOptions = data.videoDevices.map(v => {
     // "path (name)" format — use path as value, full string as label
     const match = v.match(/^(\/dev\/\S+)\s+\((.+)\)$/);
@@ -985,6 +997,14 @@ async function loadDevices(showToast) {
 
   const config = await (await fetch('/api/config')).json();
   setSelectOptions('videoDevicePath', videoOptions, config.video.device_path);
+  let monitorDevice = config.audio.monitor.device || '';
+  if (!monitorDevice || monitorDevice === 'default') {
+    monitorDevice = outputs.length ? outputs[0].value : 'default';
+  }
+  if (monitorDevice && !outputs.some(o => o.value === monitorDevice)) {
+    outputs.unshift({ value: monitorDevice, label: monitorDevice });
+  }
+  setSelectOptions('monitorDevice', outputs, monitorDevice);
   const audioContainer = document.getElementById('audioInputDevices');
   audioContainer.innerHTML = '';
   const selectedAudio = [];
@@ -1071,6 +1091,10 @@ async function loadConfig() {
 
   document.getElementById('audioMixGain').value = data.audio.mix_gain;
   document.getElementById('gainDisplay').innerText = data.audio.mix_gain;
+  document.getElementById('monitorEnabled').checked = !!data.audio.monitor.enabled;
+  document.getElementById('monitorDevice').value = data.audio.monitor.device;
+  document.getElementById('monitorGain').value = data.audio.monitor.gain;
+  document.getElementById('monitorGainDisplay').innerText = data.audio.monitor.gain;
 
   document.getElementById('previewEnabled').checked = data.preview.enabled;
   setPreviewOutputs(data.preview.outputs || []);
@@ -1149,6 +1173,9 @@ async function saveConfig() {
     payload.audio.trs_device = newTrs;
   }
   payload.audio.mix_gain = Number(document.getElementById('audioMixGain').value);
+  payload.audio.monitor.enabled = document.getElementById('monitorEnabled').checked;
+  payload.audio.monitor.device = document.getElementById('monitorDevice').value;
+  payload.audio.monitor.gain = Number(document.getElementById('monitorGain').value);
 
   payload.preview.enabled = document.getElementById('previewEnabled').checked;
   payload.preview.outputs = getPreviewOutputs();
