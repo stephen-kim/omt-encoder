@@ -648,14 +648,7 @@ mod linux {
             effective_output_rate_d as f64 / effective_output_rate_n as f64,
         );
         let mut last_output_frame_at = Instant::now() - output_frame_interval;
-        let mut last_vmx_error_log = Instant::now() - Duration::from_secs(5);
         let mut last_snapshot = Instant::now() - Duration::from_secs(2);
-        let mut vmx_instance: Option<*mut root::VMX_INSTANCE> = None;
-        let mut vmx_buffer = vec![
-            0u8;
-            (frame_size_bytes(encode_codec, encode_width, encode_height) * 2)
-                .max(8 * 1024 * 1024)
-        ];
 
         let mut current_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
         // Multi-quality VMX instances: encode at LQ, SQ, HQ simultaneously.
@@ -696,10 +689,6 @@ mod linux {
                         });
                     }
                 }
-            }
-            // Use the SQ instance as the default vmx_instance for preview/fallback
-            if let Some(sq) = quality_instances.iter().find(|q| q.level == 2) {
-                vmx_instance = Some(sq.inst);
             }
             if !quality_instances.is_empty() {
                 println!(
@@ -832,99 +821,16 @@ mod linux {
             }
 
             let codec_mask = active_codec_mask.load(Ordering::Relaxed);
-
-            // VMX1 encoding
-            let network_frame = if let (Some(inst), Some(_fmt)) =
-                (vmx_instance, codec_to_vmx_image_format(frame_codec))
-            {
-                let err = unsafe {
-                    vmx_encode_frame(
-                        inst,
-                        frame_codec,
-                        payload.as_ptr(),
-                        frame_height,
-                        frame_stride as i32,
-                    )
-                };
-                if err == root::VMX_ERR_VMX_ERR_OK {
-                    let compressed_len = unsafe {
-                        root::VMX_SaveTo(inst, vmx_buffer.as_mut_ptr(), vmx_buffer.len() as i32)
-                    };
-                    if compressed_len > 0 {
-                        let preview_payload_len =
-                            unsafe { root::VMX_GetEncodedPreviewLength(inst) };
-                        let preview_total_len = if preview_payload_len > 0 {
-                            Some(OMTVideoHeader::SIZE as i32 + preview_payload_len)
-                        } else {
-                            None
-                        };
-                        Some((
-                            Bytes::copy_from_slice(&vmx_buffer[..compressed_len as usize]),
-                            OMTCodec::VMX1,
-                            preview_total_len,
-                            video_flags_from_source_codec(frame_codec),
-                        ))
-                    } else {
-                        if last_vmx_error_log.elapsed() >= Duration::from_secs(1) {
-                            eprintln!("VMX_SaveTo returned {}", compressed_len);
-                            last_vmx_error_log = Instant::now();
-                        }
-                        None
-                    }
-                } else {
-                    if last_vmx_error_log.elapsed() >= Duration::from_secs(1) {
-                        eprintln!("VMX encode failed with err={}", err);
-                        last_vmx_error_log = Instant::now();
-                    }
-                    None
-                }
-            } else {
-                if frame_codec == OMTCodec::VMX1 {
-                    Some((payload, frame_codec, None, 0))
-                } else {
-                    if last_vmx_error_log.elapsed() >= Duration::from_secs(1) {
-                        eprintln!(
-                            "No VMX encoder available for codec {}. Dropping frame.",
-                            codec_to_name(frame_codec)
-                        );
-                        last_vmx_error_log = Instant::now();
-                    }
-                    None
-                }
-            };
-
-            let Some((network_payload, network_codec, preview_data_length, network_flags)) =
-                network_frame
-            else {
-                // No sleep needed: the next iteration blocks on stream.next() (V4L2 read).
-                continue;
-            };
-
-            let mut frame = OMTFrame::new(OMTFrameType::Video);
-            frame.video_header = Some(OMTVideoHeader {
-                codec: network_codec as i32,
-                width: frame_width as i32,
-                height: frame_height as i32,
-                frame_rate_n: effective_output_rate_n as i32,
-                frame_rate_d: effective_output_rate_d as i32,
-                aspect_ratio: frame_width as f32 / frame_height as f32,
-                flags: network_flags,
-                color_space: 709,
-            });
-            frame.data = network_payload;
-            frame.update_data_length();
-            frame.preview_data_length = preview_data_length;
-
-            let payload_len = frame.data.len();
+            let network_flags = video_flags_from_source_codec(frame_codec);
+            let payload_len = raw_payload.len();
             if startup_debug_frames < 10 {
                 println!(
-                    "Video out frame[{}]: codec={}, {}x{}, payload={}, previewLen={:?}, fps={}/{}",
+                    "Video raw frame[{}]: codec={}, {}x{}, payload={}, fps={}/{}",
                     startup_debug_frames + 1,
-                    codec_to_name(network_codec),
+                    codec_to_name(frame_codec),
                     frame_width,
                     frame_height,
                     payload_len,
-                    preview_data_length,
                     effective_output_rate_n,
                     effective_output_rate_d
                 );
@@ -1110,7 +1016,6 @@ mod linux {
             let _ = ctx.child.kill();
             let _ = ctx.child.wait();
         }
-        // vmx_instance points to one of the quality_instances (SQ), don't double-free.
         for qi in &quality_instances {
             unsafe {
                 root::VMX_Destroy(qi.inst);
