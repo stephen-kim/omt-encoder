@@ -836,6 +836,17 @@ mod linux {
         let nonblock = use_hdmi && use_trs;
 
         for rate in rate_candidates {
+            let frame_usec =
+                (settings.samples_per_channel.max(1) as u64 * 1_000_000 / rate.max(1) as u64)
+                    .clamp(1_000, u32::MAX as u64) as u32;
+            let capture_period_usec = if settings.arecord_period_usec == 0 {
+                frame_usec
+            } else {
+                settings.arecord_period_usec.min(frame_usec)
+            };
+            let capture_buffer_usec = settings
+                .arecord_buffer_usec
+                .max(capture_period_usec.saturating_mul(4));
             let mut hdmi_input: Option<AlsaInput> = None;
             let mut trs_input: Option<AlsaInput> = None;
             let mut opened_hdmi_channels = 0usize;
@@ -848,13 +859,13 @@ mod linux {
                             &device,
                             rate,
                             *ch,
-                            settings.arecord_buffer_usec,
-                            settings.arecord_period_usec,
+                            capture_buffer_usec,
+                            capture_period_usec,
                             nonblock,
                         ) {
                             println!(
-                                "Started audio input on {}. Rate: {}, Channels: {}, Format: {}",
-                                device, rate, ch, input.format
+                                "Started audio input on {}. Rate: {}, Channels: {}, Format: {}, PeriodUsec: {}, BufferUsec: {}",
+                                device, rate, ch, input.format, capture_period_usec, capture_buffer_usec
                             );
                             opened_hdmi_channels = *ch as usize;
                             hdmi_input = Some(input);
@@ -874,13 +885,13 @@ mod linux {
                             &device,
                             rate,
                             *ch,
-                            settings.arecord_buffer_usec,
-                            settings.arecord_period_usec,
+                            capture_buffer_usec,
+                            capture_period_usec,
                             nonblock,
                         ) {
                             println!(
-                                "Started audio input on {}. Rate: {}, Channels: {}, Format: {}",
-                                device, rate, ch, input.format
+                                "Started audio input on {}. Rate: {}, Channels: {}, Format: {}, PeriodUsec: {}, BufferUsec: {}",
+                                device, rate, ch, input.format, capture_period_usec, capture_buffer_usec
                             );
                             opened_trs_channels = *ch as usize;
                             trs_input = Some(input);
