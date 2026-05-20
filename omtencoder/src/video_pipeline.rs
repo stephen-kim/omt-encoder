@@ -1525,7 +1525,7 @@ mod linux {
                 .unwrap_or((input_width, input_height));
 
             let fmt = if out.pixel_format.trim().is_empty() {
-                "rgb565le".to_string()
+                framebuffer_pixel_format(&out.device).unwrap_or_else(|| "rgb565le".to_string())
             } else {
                 out.pixel_format.clone()
             };
@@ -1753,6 +1753,24 @@ mod linux {
             "bgra" | "rgba" | "argb" | "abgr" => Some(pixels * 4),
             "rgb24" | "bgr24" => Some(pixels * 3),
             "nv12" | "yuv420p" => Some(pixels * 3 / 2),
+            _ => None,
+        }
+    }
+
+    fn framebuffer_pixel_format(path: &str) -> Option<String> {
+        let fb = std::path::Path::new(path).file_name()?.to_str()?;
+        if !fb.starts_with("fb") {
+            return None;
+        }
+        let bpp_path = format!("/sys/class/graphics/{fb}/bits_per_pixel");
+        let bpp = std::fs::read_to_string(bpp_path)
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()?;
+        match bpp {
+            32 => Some("bgra".to_string()),
+            16 => Some("rgb565le".to_string()),
             _ => None,
         }
     }

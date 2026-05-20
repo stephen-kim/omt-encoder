@@ -39,6 +39,8 @@ pub struct FramebufferInfoResponse {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub bits_per_pixel: u32,
+    pub pixel_format: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -287,6 +289,7 @@ async fn get_fb_info(Query(query): Query<FbQuery>) -> impl IntoResponse {
     let mut name = String::new();
     let mut width = 0;
     let mut height = 0;
+    let mut bits_per_pixel = 0;
 
     if fb.starts_with("fb") {
         let base_path = format!("/sys/class/graphics/{}", fb);
@@ -300,12 +303,18 @@ async fn get_fb_info(Query(query): Query<FbQuery>) -> impl IntoResponse {
                 height = parts[1].parse().unwrap_or(0);
             }
         }
+        if let Ok(bpp) = fs::read_to_string(format!("{}/bits_per_pixel", base_path)) {
+            bits_per_pixel = bpp.trim().parse().unwrap_or(0);
+        }
     }
+    let pixel_format = framebuffer_pixel_format(bits_per_pixel);
 
     Json(FramebufferInfoResponse {
         name,
         width,
         height,
+        bits_per_pixel,
+        pixel_format,
     })
 }
 
@@ -467,6 +476,15 @@ fn friendly_fb_name(driver: &str) -> String {
     if lower.contains("dsi") { return format!("DSI Display ({})", driver); }
     // Fallback
     driver.to_string()
+}
+
+fn framebuffer_pixel_format(bits_per_pixel: u32) -> String {
+    match bits_per_pixel {
+        32 => "bgra",
+        16 => "rgb565le",
+        _ => "rgb565le",
+    }
+    .to_string()
 }
 
 fn list_devices(dir: &str, prefix: &str) -> Vec<String> {
