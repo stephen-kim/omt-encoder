@@ -30,7 +30,7 @@
   "send": {
     "audio_queue_capacity": 8,
     "video_queue_capacity": 1,
-    "force_zero_timestamps": true
+    "force_zero_timestamps": false
   },
   "preview": {
     "enabled": false,

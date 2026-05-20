@@ -108,8 +108,9 @@ impl Default for SendSettings {
         Self {
             audio_queue_capacity: 32,
             video_queue_capacity: 1,
-            // Match C# sender defaults: lower receiver buffering for "live" use.
-            force_zero_timestamps: true,
+            // Keep audio and video in one sender clock domain. Some receivers,
+            // including the OBS OMT plugin, use mutual A/V timestamps for sync.
+            force_zero_timestamps: false,
         }
     }
 }
