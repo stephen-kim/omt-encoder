@@ -500,8 +500,15 @@ mod linux {
                 );
                 let width = settings.width.max(1);
                 let height = settings.height.max(1);
+                let capture_format = select_ffmpeg_capture_format(&settings, desired_pix_fmt);
                 let capture =
-                    match start_ffmpeg_capture(&settings, desired_pix_fmt, width, height) {
+                    match start_ffmpeg_capture(
+                        &settings,
+                        &capture_format.pix_fmt,
+                        capture_format.force_input_format,
+                        width,
+                        height,
+                    ) {
                         Ok(capture) => capture,
                         Err(e) => {
                             eprintln!("Failed to start ffmpeg capture fallback: {}", e);
@@ -512,9 +519,9 @@ mod linux {
                 (
                     width,
                     height,
-                    desired_fourcc,
-                    desired_codec,
-                    codec_stride(desired_codec, width),
+                    codec_to_fourcc(capture_format.codec),
+                    capture_format.codec,
+                    codec_stride(capture_format.codec, width),
                 )
             };
 
@@ -1209,9 +1216,90 @@ mod linux {
         }
     }
 
+    struct FfmpegCaptureFormat {
+        pix_fmt: String,
+        codec: OMTCodec,
+        force_input_format: bool,
+    }
+
+    fn select_ffmpeg_capture_format(
+        settings: &VideoSettings,
+        preferred_pix_fmt: &str,
+    ) -> FfmpegCaptureFormat {
+        let preferred_codec = pix_fmt_to_codec(preferred_pix_fmt).unwrap_or(OMTCodec::YUY2);
+        if !settings.use_native_format {
+            return FfmpegCaptureFormat {
+                pix_fmt: preferred_pix_fmt.to_string(),
+                codec: preferred_codec,
+                force_input_format: false,
+            };
+        }
+
+        let supported = ffmpeg_v4l2_capture_pix_fmts(&settings.device_path);
+        if supported.contains(preferred_pix_fmt) {
+            return FfmpegCaptureFormat {
+                pix_fmt: preferred_pix_fmt.to_string(),
+                codec: preferred_codec,
+                force_input_format: true,
+            };
+        }
+
+        for pix_fmt in ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"] {
+            if supported.contains(pix_fmt) {
+                let codec = pix_fmt_to_codec(pix_fmt).unwrap_or(preferred_codec);
+                println!(
+                    "FFmpeg native capture format: using {} because {} is not exposed by {}",
+                    pix_fmt, preferred_pix_fmt, settings.device_path
+                );
+                return FfmpegCaptureFormat {
+                    pix_fmt: pix_fmt.to_string(),
+                    codec,
+                    force_input_format: true,
+                };
+            }
+        }
+
+        FfmpegCaptureFormat {
+            pix_fmt: preferred_pix_fmt.to_string(),
+            codec: preferred_codec,
+            force_input_format: false,
+        }
+    }
+
+    fn ffmpeg_v4l2_capture_pix_fmts(device_path: &str) -> HashSet<String> {
+        let mut supported = HashSet::new();
+        let output = match Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-f",
+                "v4l2",
+                "-list_formats",
+                "all",
+                "-i",
+                device_path,
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => return supported,
+        };
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for pix_fmt in ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"] {
+            if text.contains(&format!(": {}", pix_fmt)) {
+                supported.insert(pix_fmt.to_string());
+            }
+        }
+        supported
+    }
+
     fn start_ffmpeg_capture(
         settings: &VideoSettings,
         output_pix_fmt: &str,
+        force_input_format: bool,
         output_width: u32,
         output_height: u32,
     ) -> Result<FfmpegCapture, String> {
@@ -1225,40 +1313,52 @@ mod linux {
             output_width,
             output_height,
         );
-        let filter = format!(
-            "fps={},scale={}:{}:flags=fast_bilinear",
-            rate, output_width, output_height
-        );
-
         println!(
             "Starting ffmpeg V4L2 capture fallback: {} -> {}x{} {} @ {}",
             settings.device_path, output_width, output_height, output_pix_fmt, rate
         );
 
+        let video_size = format!("{}x{}", output_width, output_height);
+        let filter = format!(
+            "fps={},scale={}:{}:flags=fast_bilinear",
+            rate, output_width, output_height
+        );
+        let mut args = vec![
+            "-hide_banner".to_string(),
+            "-loglevel".to_string(),
+            "warning".to_string(),
+            "-fflags".to_string(),
+            "nobuffer".to_string(),
+            "-f".to_string(),
+            "v4l2".to_string(),
+        ];
+        if force_input_format {
+            args.push("-input_format".to_string());
+            args.push(output_pix_fmt.to_string());
+        }
+        args.extend([
+            "-framerate".to_string(),
+            rate.clone(),
+            "-video_size".to_string(),
+            video_size,
+            "-i".to_string(),
+            settings.device_path.clone(),
+            "-an".to_string(),
+        ]);
+        if !settings.use_native_format {
+            args.push("-vf".to_string());
+            args.push(filter);
+        }
+        args.extend([
+            "-pix_fmt".to_string(),
+            output_pix_fmt.to_string(),
+            "-f".to_string(),
+            "rawvideo".to_string(),
+            "pipe:1".to_string(),
+        ]);
+
         let mut child = Command::new("ffmpeg")
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-fflags",
-                "nobuffer",
-                "-f",
-                "v4l2",
-                "-framerate",
-                &rate,
-                "-video_size",
-                &format!("{}x{}", output_width, output_height),
-                "-i",
-                &settings.device_path,
-                "-an",
-                "-vf",
-                &filter,
-                "-pix_fmt",
-                output_pix_fmt,
-                "-f",
-                "rawvideo",
-                "pipe:1",
-            ])
+            .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
