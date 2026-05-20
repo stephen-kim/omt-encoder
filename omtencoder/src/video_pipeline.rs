@@ -1288,8 +1288,17 @@ mod linux {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        for pix_fmt in ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"] {
-            if text.contains(&format!(": {}", pix_fmt)) {
+        for line in text.lines() {
+            if !line.contains("Raw") {
+                continue;
+            }
+            let Some(raw_fmt) = line.split(':').nth(1) else {
+                continue;
+            };
+            let Some(pix_fmt) = raw_fmt.split_whitespace().next() else {
+                continue;
+            };
+            if ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"].contains(&pix_fmt) {
                 supported.insert(pix_fmt.to_string());
             }
         }
