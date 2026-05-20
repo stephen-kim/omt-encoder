@@ -95,7 +95,7 @@ impl SendCoordinator {
         stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
             0
         } else {
-            crate::timebase::monotonic_100ns()
+            crate::timebase::presentation_100ns()
         };
         let result = match quality {
             1 => self.inner.tx.video_lq.send(stamped),
@@ -115,7 +115,7 @@ impl SendCoordinator {
         stamped.header.timestamp = if self.inner.settings.force_zero_timestamps {
             0
         } else {
-            crate::timebase::monotonic_100ns()
+            crate::timebase::presentation_100ns()
         };
         let _ = match codec {
             libomtnet::OMTCodec::H264 => self.inner.tx.video_h264.send(stamped),
@@ -213,7 +213,7 @@ fn send_frame(inner: &Inner, mut frame: OMTFrame, is_audio: bool) {
     frame.header.timestamp = if inner.settings.force_zero_timestamps {
         0
     } else {
-        crate::timebase::monotonic_100ns()
+        crate::timebase::presentation_100ns()
     };
     let send_result = if is_audio {
         inner.tx.audio.send(frame)

@@ -35,7 +35,7 @@ impl AudioTimestampClock {
     fn next(&mut self, samples_per_channel: usize, sample_rate: u32) -> i64 {
         let interval =
             (10_000_000i64 * samples_per_channel.max(1) as i64) / sample_rate.max(1) as i64;
-        let target = crate::timebase::monotonic_100ns().saturating_sub(interval);
+        let target = crate::timebase::presentation_100ns().saturating_sub(interval);
 
         if self.timestamp_100ns == 0 {
             self.timestamp_100ns = target;

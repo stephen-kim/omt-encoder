@@ -14,6 +14,16 @@ pub fn monotonic_100ns() -> i64 {
     (ts.tv_sec as i64 * 10_000_000) + (ts.tv_nsec as i64 / 100)
 }
 
+/// Presentation timestamp used for realtime receivers.
+///
+/// OBS's OMT source feeds timestamps directly into OBS's async audio/video
+/// buffers. A small future lead gives OBS room to absorb occasional scheduler
+/// or network jitter instead of underrunning the audio buffer.
+pub fn presentation_100ns() -> i64 {
+    const OBS_JITTER_LEAD_100NS: i64 = 2_000_000; // 200ms
+    monotonic_100ns().saturating_add(OBS_JITTER_LEAD_100NS)
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn monotonic_100ns() -> i64 {
     use std::sync::OnceLock;
