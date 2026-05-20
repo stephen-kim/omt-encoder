@@ -454,19 +454,22 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #000;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
 }
 
 .preview-frame img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
   opacity: 0;
   pointer-events: none;
+  transition: opacity 120ms linear;
+  will-change: opacity;
 }
+
+.preview-frame img.active { opacity: 1; }
 
 .preview-empty {
   position: absolute;
@@ -586,7 +589,8 @@ small { color: var(--muted); display: block; margin-top: 8px; }
   <div class="card" style="display:flex;gap:16px;align-items:stretch;">
     <div style="flex:1;min-width:0;">
       <div id="previewFrame" class="preview-frame">
-        <img id="previewImg" decoding="async" alt="Preview" />
+        <img id="previewImgA" decoding="async" alt="Preview" />
+        <img id="previewImgB" decoding="async" alt="" aria-hidden="true" />
         <div id="previewEmpty" class="preview-empty" data-i18n="noPreview">No preview image</div>
       </div>
     </div>
@@ -1182,7 +1186,8 @@ function formatDuration(epochSecs) {
 }
 
 let previewRefreshInFlight = false;
-let previewObjectUrl = '';
+let previewObjectUrls = ['', ''];
+let previewActiveLayer = 0;
 let previewHasImage = false;
 let previewFailureCount = 0;
 const PREVIEW_FAILURES_BEFORE_CLEAR = 3;
@@ -1192,17 +1197,15 @@ function setPreviewAvailable(available) {
 }
 
 function clearPreviewImage() {
-  const frame = document.getElementById('previewFrame');
-  const img = document.getElementById('previewImg');
-  if (previewObjectUrl) {
-    URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = '';
+  for (const url of previewObjectUrls) {
+    if (url) URL.revokeObjectURL(url);
   }
-  if (frame) frame.style.backgroundImage = '';
-  if (img) {
+  previewObjectUrls = ['', ''];
+  for (const img of getPreviewLayers()) {
     img.onload = null;
     img.onerror = null;
     img.removeAttribute('src');
+    img.classList.remove('active');
   }
   previewHasImage = false;
   setPreviewAvailable(false);
@@ -1213,6 +1216,24 @@ function markPreviewUnavailable() {
   if (!previewHasImage || previewFailureCount >= PREVIEW_FAILURES_BEFORE_CLEAR) {
     clearPreviewImage();
   }
+}
+
+function getPreviewLayers() {
+  return [
+    document.getElementById('previewImgA'),
+    document.getElementById('previewImgB')
+  ].filter(Boolean);
+}
+
+async function loadPreviewLayer(img, url) {
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = url;
+  });
+  try {
+    if (img.decode) await img.decode();
+  } catch (_) {}
 }
 
 async function refreshPreviewImage() {
@@ -1231,28 +1252,29 @@ async function refreshPreviewImage() {
     }
 
     const frame = document.getElementById('previewFrame');
-    const img = document.getElementById('previewImg');
-    if (!frame || !img) return;
-    const previousUrl = previewObjectUrl;
+    const layers = getPreviewLayers();
+    if (!frame || layers.length < 2) return;
+    const nextLayer = previewHasImage ? (previewActiveLayer === 0 ? 1 : 0) : 0;
+    const prevLayer = previewActiveLayer;
+    const nextImg = layers[nextLayer];
+    const prevImg = layers[prevLayer];
+    const previousUrl = previewObjectUrls[nextLayer];
     const nextUrl = URL.createObjectURL(blob);
     try {
-      const preload = new Image();
-      preload.decoding = 'async';
-      await new Promise((resolve, reject) => {
-        preload.onload = resolve;
-        preload.onerror = reject;
-        preload.src = nextUrl;
-      });
-      try {
-        if (preload.decode) await preload.decode();
-      } catch (_) {}
-      frame.style.backgroundImage = `url("${nextUrl}")`;
-      img.src = nextUrl;
-      previewObjectUrl = nextUrl;
+      await loadPreviewLayer(nextImg, nextUrl);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      nextImg.classList.add('active');
+      if (previewHasImage && prevImg && prevImg !== nextImg) {
+        prevImg.classList.remove('active');
+      }
+      previewObjectUrls[nextLayer] = nextUrl;
+      previewActiveLayer = nextLayer;
       previewHasImage = true;
       previewFailureCount = 0;
       setPreviewAvailable(true);
-      if (previousUrl && previousUrl !== nextUrl) URL.revokeObjectURL(previousUrl);
+      if (previousUrl && previousUrl !== nextUrl) {
+        setTimeout(() => URL.revokeObjectURL(previousUrl), 500);
+      }
     } catch (_) {
       URL.revokeObjectURL(nextUrl);
       markPreviewUnavailable();
