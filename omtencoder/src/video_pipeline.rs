@@ -671,6 +671,9 @@ mod linux {
                 width: encode_width as i32,
                 height: encode_height as i32,
             };
+            let vmx_threads = std::thread::available_parallelism()
+                .map(|n| n.get().clamp(2, 4))
+                .unwrap_or(2);
             let buf_size = (frame_size_bytes(encode_codec, encode_width, encode_height) * 2)
                 .max(8 * 1024 * 1024);
             for &(level, profile) in &[
@@ -685,7 +688,7 @@ mod linux {
                         root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
                     );
                     if !inst.is_null() {
-                        let _ = root::VMX_SetThreads(inst, 2);
+                        let _ = root::VMX_SetThreads(inst, vmx_threads as i32);
                         quality_instances.push(QualityInstance {
                             inst,
                             level,
@@ -700,8 +703,9 @@ mod linux {
             }
             if !quality_instances.is_empty() {
                 println!(
-                    "Multi-quality encoding enabled: {} quality levels",
-                    quality_instances.len()
+                    "Multi-quality encoding enabled: {} quality levels, {} VMX threads each",
+                    quality_instances.len(),
+                    vmx_threads
                 );
             }
         } else {
