@@ -336,7 +336,7 @@ async fn generate_preview_loop(
     use std::io::Write;
 
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
 
         // Read latest raw frame from video pipeline
         let (raw, width, height, pix_fmt) = {
@@ -349,19 +349,40 @@ async fn generate_preview_loop(
 
         // Convert to JPEG via ffmpeg (runs in blocking threadpool)
         let result = tokio::task::spawn_blocking(move || {
+            let size = format!("{}x{}", width, height);
+            let mut args = vec![
+                "-loglevel".to_string(),
+                "error".to_string(),
+                "-f".to_string(),
+                "rawvideo".to_string(),
+                "-pix_fmt".to_string(),
+                pix_fmt.clone(),
+                "-s".to_string(),
+                size,
+                "-i".to_string(),
+                "pipe:0".to_string(),
+            ];
+            let preview_width = width.min(640).max(1);
+            if width > preview_width {
+                args.extend([
+                    "-vf".to_string(),
+                    format!("scale={}:-2:flags=fast_bilinear", preview_width),
+                ]);
+            }
+            args.extend([
+                "-frames:v".to_string(),
+                "1".to_string(),
+                "-f".to_string(),
+                "image2".to_string(),
+                "-vcodec".to_string(),
+                "mjpeg".to_string(),
+                "-q:v".to_string(),
+                "8".to_string(),
+                "pipe:1".to_string(),
+            ]);
+
             let mut child = std::process::Command::new("ffmpeg")
-                .args([
-                    "-loglevel", "error",
-                    "-f", "rawvideo",
-                    "-pix_fmt", &pix_fmt,
-                    "-s", &format!("{}x{}", width, height),
-                    "-i", "pipe:0",
-                    "-frames:v", "1",
-                    "-f", "image2",
-                    "-vcodec", "mjpeg",
-                    "-q:v", "8",
-                    "pipe:1",
-                ])
+                .args(args)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
