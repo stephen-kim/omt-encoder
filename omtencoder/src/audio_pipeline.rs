@@ -24,6 +24,40 @@ impl AudioLevels {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct AudioTimestampClock {
+    timestamp_100ns: i64,
+}
+
+#[cfg(target_os = "linux")]
+impl AudioTimestampClock {
+    fn next(&mut self, samples_per_channel: usize, sample_rate: u32) -> i64 {
+        let interval =
+            (10_000_000i64 * samples_per_channel.max(1) as i64) / sample_rate.max(1) as i64;
+        let target = crate::timebase::monotonic_100ns().saturating_sub(interval);
+
+        if self.timestamp_100ns == 0 {
+            self.timestamp_100ns = target;
+            return self.timestamp_100ns;
+        }
+
+        let mut next = self.timestamp_100ns + interval;
+        let drift = target - next;
+        const CORRECTION_THRESHOLD_100NS: i64 = 50_000; // 5ms
+        if drift.abs() > CORRECTION_THRESHOLD_100NS {
+            let max_correction = (interval / 40).clamp(5_000, 20_000); // 0.5ms..2ms/frame
+            next += drift.clamp(-max_correction, max_correction);
+        }
+
+        if next <= self.timestamp_100ns {
+            next = self.timestamp_100ns + 1;
+        }
+        self.timestamp_100ns = next;
+        self.timestamp_100ns
+    }
+}
+
 pub struct AudioPipeline {
     settings: AudioSettings,
     audio_tx: broadcast::Sender<OMTFrame>,
@@ -262,7 +296,7 @@ mod linux {
         let mut last_diag_log = Instant::now();
         let mut consecutive_silence: u32 = 0;
         let mut silence_events: u64 = 0;
-        let mut audio_timestamp: i64 = 0;
+        let mut audio_timestamp = AudioTimestampClock::default();
         let frame_duration_ms = (frame_size as u64 * 1000 / effective_rate.max(1) as u64).max(1);
         let slow_audio_loop_ms = (frame_duration_ms + 10).max(20);
 
@@ -664,7 +698,7 @@ mod linux {
         planar_scratch: &mut Vec<f32>,
         packed_scratch: &mut Vec<f32>,
         wire_scratch: &mut Vec<u8>,
-        audio_timestamp: &mut i64,
+        audio_timestamp: &mut AudioTimestampClock,
     ) {
         if planar_scratch.len() != interleaved.len() {
             planar_scratch.resize(interleaved.len(), 0.0);
@@ -688,16 +722,7 @@ mod linux {
         );
 
         let mut frame = OMTFrame::new(OMTFrameType::Audio);
-        // Keep audio timestamps strictly sample-count based. Periodic wall-clock
-        // correction creates timestamp jumps when the HDMI audio clock and system
-        // monotonic clock differ slightly, which receivers can hear as short gaps.
-        let frame_interval = 10_000_000i64 * samples_per_channel as i64 / sample_rate as i64;
-        if *audio_timestamp == 0 {
-            *audio_timestamp = crate::timebase::monotonic_100ns();
-        } else {
-            *audio_timestamp += frame_interval;
-        }
-        frame.header.timestamp = *audio_timestamp;
+        frame.header.timestamp = audio_timestamp.next(samples_per_channel, sample_rate);
         frame.audio_header = Some(libomtnet::OMTAudioHeader {
             codec: libomtnet::OMTCodec::FPA1 as i32,
             sample_rate: sample_rate as i32,
