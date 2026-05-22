@@ -763,6 +763,13 @@ mod linux {
                 }
                 last_output_frame_at = now;
             }
+            let raw_data = if input_codec == OMTCodec::BGRA
+                && raw_data.len() == input_width as usize * input_height as usize * 3
+            {
+                Bytes::from(bgr24_to_bgra(&raw_data))
+            } else {
+                raw_data
+            };
 
             let (payload, frame_codec, frame_width, frame_height, frame_stride) =
                 if let Some(ref mut ctx) = transform {
@@ -1157,9 +1164,13 @@ mod linux {
             };
         }
 
-        for pix_fmt in ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"] {
+        for pix_fmt in ["bgr24", "nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"] {
             if supported.contains(pix_fmt) {
-                let codec = pix_fmt_to_codec(pix_fmt).unwrap_or(preferred_codec);
+                let codec = if pix_fmt == "bgr24" {
+                    OMTCodec::BGRA
+                } else {
+                    pix_fmt_to_codec(pix_fmt).unwrap_or(preferred_codec)
+                };
                 println!(
                     "FFmpeg native capture format: using {} because {} is not exposed by {}",
                     pix_fmt, preferred_pix_fmt, settings.device_path
@@ -1211,7 +1222,7 @@ mod linux {
             let Some(pix_fmt) = raw_fmt.split_whitespace().next() else {
                 continue;
             };
-            if ["nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"].contains(&pix_fmt) {
+            if ["bgr24", "nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"].contains(&pix_fmt) {
                 supported.insert(pix_fmt.to_string());
             }
         }
@@ -1230,11 +1241,14 @@ mod linux {
         } else {
             format!("{}/{}", settings.frame_rate_n, settings.frame_rate_d.max(1))
         };
-        let frame_size = frame_size_bytes(
-            pix_fmt_to_codec(output_pix_fmt).unwrap_or(OMTCodec::YUY2),
-            output_width,
-            output_height,
-        );
+        let frame_size = raw_frame_size(output_width, output_height, output_pix_fmt)
+            .unwrap_or_else(|| {
+                frame_size_bytes(
+                    pix_fmt_to_codec(output_pix_fmt).unwrap_or(OMTCodec::YUY2),
+                    output_width,
+                    output_height,
+                )
+            });
         println!(
             "Starting ffmpeg V4L2 capture fallback: {} -> {}x{} {} @ {}",
             settings.device_path, output_width, output_height, output_pix_fmt, rate
@@ -1378,6 +1392,17 @@ mod linux {
             }
         }
         true
+    }
+
+    fn bgr24_to_bgra(input: &[u8]) -> Vec<u8> {
+        let pixels = input.len() / 3;
+        let mut out = vec![255u8; pixels * 4];
+        for (src, dst) in input.chunks_exact(3).zip(out.chunks_exact_mut(4)) {
+            dst[0] = src[0];
+            dst[1] = src[1];
+            dst[2] = src[2];
+        }
+        out
     }
 
     fn parse_codec(codec: &str) -> Option<OMTCodec> {
