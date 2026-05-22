@@ -1631,7 +1631,7 @@ mod linux {
         for device in auto_hdmi_outputs {
             resolved.push(ResolvedOutput {
                 device,
-                fps: settings.frame_rate_n.max(1),
+                fps: 0,
                 pixel_format: String::new(),
                 rotate: 0,
             });
@@ -1686,13 +1686,22 @@ mod linux {
                 })
                 .unwrap_or((input_width, input_height));
 
-            let fmt = if out.pixel_format.trim().is_empty() {
+            let hdmi_framebuffer = is_hdmi_framebuffer(&out.device);
+            let fmt = if hdmi_framebuffer {
+                framebuffer_pixel_format(&out.device).unwrap_or_else(|| {
+                    if out.pixel_format.trim().is_empty() {
+                        "rgb565le".to_string()
+                    } else {
+                        out.pixel_format.clone()
+                    }
+                })
+            } else if out.pixel_format.trim().is_empty() {
                 framebuffer_pixel_format(&out.device).unwrap_or_else(|| "rgb565le".to_string())
             } else {
                 out.pixel_format.clone()
             };
 
-            if is_hdmi_framebuffer(&out.device)
+            if hdmi_framebuffer
                 && !(out.rotate == 0
                     && input_width == preview_width
                     && input_height == preview_height
