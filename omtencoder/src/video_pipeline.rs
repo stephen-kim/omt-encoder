@@ -652,6 +652,8 @@ mod linux {
         );
         let mut last_output_frame_at = Instant::now() - output_frame_interval;
         let mut last_snapshot = Instant::now() - Duration::from_secs(2);
+        let mut last_preview_hotplug_check = Instant::now();
+        let mut last_detected_hdmi_outputs = connected_hdmi_framebuffers();
 
         let mut current_quality_level = suggested_quality_hint.load(Ordering::Relaxed);
         // Multi-quality VMX instances: encode at LQ, SQ, HQ simultaneously.
@@ -729,6 +731,32 @@ mod linux {
                     input_fourcc,
                 );
                 preview_enabled = !preview_sinks.is_empty();
+                last_detected_hdmi_outputs = connected_hdmi_framebuffers();
+            } else if last_preview_hotplug_check.elapsed() >= Duration::from_secs(2) {
+                last_preview_hotplug_check = Instant::now();
+                let current_preview = preview.blocking_read().clone();
+                if current_preview.auto_hdmi_monitor
+                    || preview_has_framebuffer_output(&current_preview)
+                    || !last_detected_hdmi_outputs.is_empty()
+                {
+                    let connected_hdmi_outputs = connected_hdmi_framebuffers();
+                    if connected_hdmi_outputs != last_detected_hdmi_outputs {
+                        println!(
+                            "HDMI preview outputs changed: {:?} -> {:?}",
+                            last_detected_hdmi_outputs, connected_hdmi_outputs
+                        );
+                        stop_preview_sinks(&mut preview_sinks);
+                        preview_sinks = build_preview_sinks(
+                            &settings,
+                            &current_preview,
+                            input_width,
+                            input_height,
+                            input_fourcc,
+                        );
+                        preview_enabled = !preview_sinks.is_empty();
+                        last_detected_hdmi_outputs = connected_hdmi_outputs;
+                    }
+                }
             }
             // Quality-level switching is handled by per-quality VMX instances.
             // No need to recreate the default instance.
@@ -1048,6 +1076,12 @@ mod linux {
                 let _ = handle.join();
             }
         }
+    }
+
+    fn preview_has_framebuffer_output(preview: &PreviewSettings) -> bool {
+        preview.output_device.starts_with("/dev/fb")
+            || preview.output_devices.iter().any(|d| d.starts_with("/dev/fb"))
+            || preview.outputs.iter().any(|o| o.device.starts_with("/dev/fb"))
     }
 
     unsafe fn vmx_encode_frame(
@@ -1584,8 +1618,9 @@ mod linux {
         input_height: u32,
         input_fourcc: FourCC,
     ) -> Vec<PreviewSink> {
+        let connected_hdmi_outputs = connected_hdmi_framebuffers();
         let auto_hdmi_outputs = if preview.auto_hdmi_monitor {
-            connected_hdmi_framebuffers()
+            connected_hdmi_outputs.clone()
         } else {
             Vec::new()
         };
@@ -1687,6 +1722,10 @@ mod linux {
                 .unwrap_or((input_width, input_height));
 
             let hdmi_framebuffer = is_hdmi_framebuffer(&out.device);
+            if hdmi_framebuffer && !connected_hdmi_outputs.contains(&out.device) {
+                println!("Skipping disconnected HDMI monitor output {}", out.device);
+                continue;
+            }
             let fmt = if hdmi_framebuffer {
                 framebuffer_pixel_format(&out.device).unwrap_or_else(|| {
                     if out.pixel_format.trim().is_empty() {
