@@ -167,7 +167,11 @@ mod linux {
     use libvmx_sys::root;
     use memmap2::MmapOptions;
     use std::collections::HashSet;
+    use std::ffi::CStr;
+    use std::fs::File;
     use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
     use std::sync::mpsc;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -198,6 +202,7 @@ mod linux {
 
     enum CaptureSource<'a> {
         V4l { stream: MmapStream<'a> },
+        Mplane(MplaneCapture),
         Ffmpeg(FfmpegCapture),
     }
 
@@ -207,6 +212,354 @@ mod linux {
         frame_buf: Vec<u8>,
     }
 
+    const VIDEO_MAX_PLANES: usize = 8;
+    const V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE: u32 = 9;
+    const V4L2_MEMORY_MMAP: u32 = 1;
+    const V4L2_FIELD_NONE: u32 = 1;
+    const V4L2_PIX_FMT_BGR24: u32 = u32::from_le_bytes(*b"BGR3");
+    const DRM_CLIENT_CAP_UNIVERSAL_PLANES: u64 = 2;
+    const DRM_MODE_CONNECTED: u32 = 1;
+    const DRM_FORMAT_BGR888: u32 = u32::from_le_bytes(*b"BG24");
+    const DRM_PLANE_TYPE_PRIMARY: i32 = 1;
+    const DRM_MODE_OBJECT_PLANE: u32 = 0xeeeeeeee;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct V4l2PlanePixFormat {
+        sizeimage: u32,
+        bytesperline: u32,
+        reserved: [u16; 6],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct V4l2PixFormatMplane {
+        width: u32,
+        height: u32,
+        pixelformat: u32,
+        field: u32,
+        colorspace: u32,
+        plane_fmt: [V4l2PlanePixFormat; VIDEO_MAX_PLANES],
+        num_planes: u8,
+        flags: u8,
+        ycbcr_enc: u8,
+        quantization: u8,
+        xfer_func: u8,
+        reserved: [u8; 7],
+    }
+
+    impl Default for V4l2PixFormatMplane {
+        fn default() -> Self {
+            Self {
+                width: 0,
+                height: 0,
+                pixelformat: 0,
+                field: 0,
+                colorspace: 0,
+                plane_fmt: [V4l2PlanePixFormat::default(); VIDEO_MAX_PLANES],
+                num_planes: 0,
+                flags: 0,
+                ycbcr_enc: 0,
+                quantization: 0,
+                xfer_func: 0,
+                reserved: [0; 7],
+            }
+        }
+    }
+
+    #[repr(C)]
+    struct V4l2Format {
+        type_: u32,
+        // v4l2_format has a 200-byte union at offset 8 on aarch64. We only use
+        // pix_mp, but the ioctl request size must match the C struct exactly.
+        _pad: u32,
+        fmt: V4l2PixFormatMplane,
+        _fmt_padding: [u8; 8],
+    }
+
+    impl Default for V4l2Format {
+        fn default() -> Self {
+            Self {
+                type_: 0,
+                _pad: 0,
+                fmt: V4l2PixFormatMplane::default(),
+                _fmt_padding: [0; 8],
+            }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct V4l2RequestBuffers {
+        count: u32,
+        type_: u32,
+        memory: u32,
+        capabilities: u32,
+        flags: u8,
+        reserved: [u8; 3],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct V4l2Plane {
+        bytesused: u32,
+        length: u32,
+        m: u64,
+        data_offset: u32,
+        reserved: [u32; 11],
+    }
+
+    impl Default for V4l2Plane {
+        fn default() -> Self {
+            Self {
+                bytesused: 0,
+                length: 0,
+                m: 0,
+                data_offset: 0,
+                reserved: [0; 11],
+            }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct V4l2TimeCode {
+        type_: u32,
+        flags: u32,
+        frames: u8,
+        seconds: u8,
+        minutes: u8,
+        hours: u8,
+        userbits: [u8; 4],
+    }
+
+    #[repr(C)]
+    struct V4l2Buffer {
+        index: u32,
+        type_: u32,
+        bytesused: u32,
+        flags: u32,
+        field: u32,
+        timestamp: libc::timeval,
+        timecode: V4l2TimeCode,
+        sequence: u32,
+        memory: u32,
+        m: u64,
+        length: u32,
+        reserved2: u32,
+        request_fd: i32,
+    }
+
+    impl Default for V4l2Buffer {
+        fn default() -> Self {
+            Self {
+                index: 0,
+                type_: 0,
+                bytesused: 0,
+                flags: 0,
+                field: 0,
+                timestamp: libc::timeval {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+                timecode: V4l2TimeCode::default(),
+                sequence: 0,
+                memory: 0,
+                m: 0,
+                length: 0,
+                reserved2: 0,
+                request_fd: 0,
+            }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct V4l2ExportBuffer {
+        type_: u32,
+        index: u32,
+        plane: u32,
+        flags: u32,
+        fd: i32,
+        reserved: [u32; 11],
+    }
+
+    nix::ioctl_readwrite!(vidioc_g_fmt, b'V', 4, V4l2Format);
+    nix::ioctl_readwrite!(vidioc_s_fmt, b'V', 5, V4l2Format);
+    nix::ioctl_readwrite!(vidioc_reqbufs, b'V', 8, V4l2RequestBuffers);
+    nix::ioctl_readwrite!(vidioc_querybuf, b'V', 9, V4l2Buffer);
+    nix::ioctl_readwrite!(vidioc_qbuf, b'V', 15, V4l2Buffer);
+    nix::ioctl_readwrite!(vidioc_expbuf, b'V', 16, V4l2ExportBuffer);
+    nix::ioctl_readwrite!(vidioc_dqbuf, b'V', 17, V4l2Buffer);
+    nix::ioctl_write_ptr!(vidioc_streamon, b'V', 18, u32);
+    nix::ioctl_write_ptr!(vidioc_streamoff, b'V', 19, u32);
+
+    #[repr(C)]
+    struct DrmModeRes {
+        count_fbs: libc::c_int,
+        fbs: *mut u32,
+        count_crtcs: libc::c_int,
+        crtcs: *mut u32,
+        count_connectors: libc::c_int,
+        connectors: *mut u32,
+        count_encoders: libc::c_int,
+        encoders: *mut u32,
+        min_width: u32,
+        max_width: u32,
+        min_height: u32,
+        max_height: u32,
+    }
+
+    #[repr(C)]
+    struct DrmModeConnector {
+        connector_id: u32,
+        encoder_id: u32,
+        connector_type: u32,
+        connector_type_id: u32,
+        connection: u32,
+        mm_width: u32,
+        mm_height: u32,
+        subpixel: u32,
+        count_modes: libc::c_int,
+        modes: *mut libc::c_void,
+        count_props: libc::c_int,
+        props: *mut u32,
+        prop_values: *mut u64,
+        count_encoders: libc::c_int,
+        encoders: *mut u32,
+    }
+
+    #[repr(C)]
+    struct DrmModeEncoder {
+        encoder_id: u32,
+        encoder_type: u32,
+        crtc_id: u32,
+        possible_crtcs: u32,
+        possible_clones: u32,
+    }
+
+    #[repr(C)]
+    struct DrmModePlaneRes {
+        count_planes: u32,
+        planes: *mut u32,
+    }
+
+    #[repr(C)]
+    struct DrmModePlane {
+        count_formats: u32,
+        formats: *mut u32,
+        plane_id: u32,
+        crtc_id: u32,
+        fb_id: u32,
+        crtc_x: u32,
+        crtc_y: u32,
+        x: u32,
+        y: u32,
+        possible_crtcs: u32,
+        gamma_size: u32,
+    }
+
+    #[repr(C)]
+    struct DrmModeObjectProperties {
+        count_props: u32,
+        props: *mut u32,
+        prop_values: *mut u64,
+    }
+
+    #[repr(C)]
+    struct DrmModePropertyRes {
+        prop_id: u32,
+        flags: u32,
+        name: [libc::c_char; 32],
+        count_values: libc::c_int,
+        values: *mut u64,
+        count_enums: libc::c_int,
+        enums: *mut libc::c_void,
+        count_blobs: libc::c_int,
+        blob_ids: *mut u32,
+    }
+
+    #[link(name = "drm")]
+    extern "C" {
+        fn drmSetClientCap(fd: libc::c_int, capability: u64, value: u64) -> libc::c_int;
+        fn drmModeGetResources(fd: libc::c_int) -> *mut DrmModeRes;
+        fn drmModeFreeResources(ptr: *mut DrmModeRes);
+        fn drmModeGetConnector(fd: libc::c_int, connector_id: u32) -> *mut DrmModeConnector;
+        fn drmModeFreeConnector(ptr: *mut DrmModeConnector);
+        fn drmModeGetEncoder(fd: libc::c_int, encoder_id: u32) -> *mut DrmModeEncoder;
+        fn drmModeFreeEncoder(ptr: *mut DrmModeEncoder);
+        fn drmModeGetPlaneResources(fd: libc::c_int) -> *mut DrmModePlaneRes;
+        fn drmModeFreePlaneResources(ptr: *mut DrmModePlaneRes);
+        fn drmModeGetPlane(fd: libc::c_int, plane_id: u32) -> *mut DrmModePlane;
+        fn drmModeFreePlane(ptr: *mut DrmModePlane);
+        fn drmModeObjectGetProperties(
+            fd: libc::c_int,
+            object_id: u32,
+            object_type: u32,
+        ) -> *mut DrmModeObjectProperties;
+        fn drmModeFreeObjectProperties(ptr: *mut DrmModeObjectProperties);
+        fn drmModeGetProperty(fd: libc::c_int, property_id: u32) -> *mut DrmModePropertyRes;
+        fn drmModeFreeProperty(ptr: *mut DrmModePropertyRes);
+        fn drmPrimeFDToHandle(
+            fd: libc::c_int,
+            prime_fd: libc::c_int,
+            handle: *mut u32,
+        ) -> libc::c_int;
+        fn drmModeAddFB2(
+            fd: libc::c_int,
+            width: u32,
+            height: u32,
+            pixel_format: u32,
+            bo_handles: *const u32,
+            pitches: *const u32,
+            offsets: *const u32,
+            buf_id: *mut u32,
+            flags: u32,
+        ) -> libc::c_int;
+        fn drmModeRmFB(fd: libc::c_int, buffer_id: u32) -> libc::c_int;
+        fn drmModeSetPlane(
+            fd: libc::c_int,
+            plane_id: u32,
+            crtc_id: u32,
+            fb_id: u32,
+            flags: u32,
+            crtc_x: i32,
+            crtc_y: i32,
+            crtc_w: u32,
+            crtc_h: u32,
+            src_x: u32,
+            src_y: u32,
+            src_w: u32,
+            src_h: u32,
+        ) -> libc::c_int;
+    }
+
+    struct MplaneBuffer {
+        map: memmap2::MmapMut,
+        length: usize,
+        dma_fd: Option<File>,
+        drm_handle: u32,
+        fb_id: u32,
+    }
+
+    struct DrmMirror {
+        file: File,
+        crtc_id: u32,
+        plane_id: u32,
+        width: u32,
+        height: u32,
+    }
+
+    struct MplaneCapture {
+        file: File,
+        buffers: Vec<MplaneBuffer>,
+        frame_size: usize,
+        mirror: Option<DrmMirror>,
+        mirror_errors: u32,
+        frames: usize,
+        window_start: Instant,
+    }
+
     impl Drop for FfmpegCapture {
         fn drop(&mut self) {
             let _ = self.child.kill();
@@ -214,17 +567,491 @@ mod linux {
         }
     }
 
+    impl MplaneCapture {
+        fn start(
+            settings: &VideoSettings,
+            width: u32,
+            height: u32,
+            enable_drm_mirror: bool,
+        ) -> Result<(Self, u32, u32, u32), String> {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&settings.device_path)
+                .map_err(|e| format!("open mplane capture {}: {}", settings.device_path, e))?;
+            let fd = file.as_raw_fd();
+
+            let mut fmt = V4l2Format::default();
+            fmt.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            fmt.fmt.width = width.max(1);
+            fmt.fmt.height = height.max(1);
+            fmt.fmt.pixelformat = V4L2_PIX_FMT_BGR24;
+            fmt.fmt.field = V4L2_FIELD_NONE;
+            fmt.fmt.num_planes = 1;
+            if unsafe { vidioc_s_fmt(fd, &mut fmt) }.is_err() {
+                // Some drivers reject S_FMT when already fixed; G_FMT below decides support.
+                fmt = V4l2Format::default();
+                fmt.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            }
+            unsafe { vidioc_g_fmt(fd, &mut fmt) }
+                .map_err(|e| format!("VIDIOC_G_FMT mplane: {}", e))?;
+
+            if fmt.fmt.pixelformat != V4L2_PIX_FMT_BGR24 || fmt.fmt.num_planes == 0 {
+                return Err(format!(
+                    "unsupported mplane format {} planes={}",
+                    fourcc_u32_to_string(fmt.fmt.pixelformat),
+                    fmt.fmt.num_planes
+                ));
+            }
+
+            let width = fmt.fmt.width;
+            let height = fmt.fmt.height;
+            let pitch = fmt.fmt.plane_fmt[0].bytesperline;
+            let frame_size = fmt.fmt.plane_fmt[0].sizeimage as usize;
+            if pitch == 0 || frame_size == 0 {
+                return Err("invalid mplane pitch/frame size".to_string());
+            }
+
+            let mut req = V4l2RequestBuffers {
+                count: 4,
+                type_: V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+                memory: V4L2_MEMORY_MMAP,
+                ..Default::default()
+            };
+            unsafe { vidioc_reqbufs(fd, &mut req) }
+                .map_err(|e| format!("VIDIOC_REQBUFS mplane: {}", e))?;
+            if req.count < 2 {
+                return Err(format!("not enough mplane buffers: {}", req.count));
+            }
+
+            let mut mirror = if enable_drm_mirror {
+                match DrmMirror::open(width, height) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("Direct DRM HDMI monitor unavailable: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            let mut buffers = Vec::new();
+            for index in 0..req.count {
+                let mut planes = [V4l2Plane::default(); VIDEO_MAX_PLANES];
+                let mut buf = V4l2Buffer {
+                    type_: V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+                    memory: V4L2_MEMORY_MMAP,
+                    index,
+                    length: VIDEO_MAX_PLANES as u32,
+                    m: planes.as_mut_ptr() as u64,
+                    ..Default::default()
+                };
+                unsafe { vidioc_querybuf(fd, &mut buf) }
+                    .map_err(|e| format!("VIDIOC_QUERYBUF mplane: {}", e))?;
+                let length = planes[0].length as usize;
+                let offset = planes[0].m as u64;
+                let map = unsafe {
+                    MmapOptions::new()
+                        .len(length)
+                        .offset(offset)
+                        .map_mut(&file)
+                        .map_err(|e| format!("mmap mplane buffer: {}", e))?
+                };
+
+                let mut dma_fd = None;
+                let mut drm_handle = 0u32;
+                let mut fb_id = 0u32;
+                if let Some(ref mut drm) = mirror {
+                    let mut exp = V4l2ExportBuffer {
+                        type_: V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+                        index,
+                        plane: 0,
+                        flags: libc::O_CLOEXEC as u32,
+                        ..Default::default()
+                    };
+                    unsafe { vidioc_expbuf(fd, &mut exp) }
+                        .map_err(|e| format!("VIDIOC_EXPBUF mplane: {}", e))?;
+                    let exported = unsafe { File::from_raw_fd(exp.fd) };
+                    drm.add_framebuffer(exported.as_raw_fd(), pitch, &mut drm_handle, &mut fb_id)
+                        .map_err(|e| format!("DRM add framebuffer: {}", e))?;
+                    dma_fd = Some(exported);
+                }
+
+                unsafe { vidioc_qbuf(fd, &mut buf) }
+                    .map_err(|e| format!("VIDIOC_QBUF mplane: {}", e))?;
+
+                buffers.push(MplaneBuffer {
+                    map,
+                    length,
+                    dma_fd,
+                    drm_handle,
+                    fb_id,
+                });
+            }
+
+            let type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            unsafe { vidioc_streamon(fd, &type_ as *const u32) }
+                .map_err(|e| format!("VIDIOC_STREAMON mplane: {}", e))?;
+
+            println!(
+                "V4L2 multiplanar capture started: {}x{} BGR3 pitch={} buffers={} drm_mirror={}",
+                width,
+                height,
+                pitch,
+                buffers.len(),
+                mirror.is_some()
+            );
+
+            Ok((
+                Self {
+                    file,
+                    buffers,
+                    frame_size,
+                    mirror,
+                    mirror_errors: 0,
+                    frames: 0,
+                    window_start: Instant::now(),
+                },
+                width,
+                height,
+                pitch,
+            ))
+        }
+
+        fn next_frame(&mut self, copy_frame: bool) -> Result<Option<Bytes>, String> {
+            let fd = self.file.as_raw_fd();
+            loop {
+                let mut planes = [V4l2Plane::default(); VIDEO_MAX_PLANES];
+                let mut buf = V4l2Buffer {
+                    type_: V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+                    memory: V4L2_MEMORY_MMAP,
+                    length: VIDEO_MAX_PLANES as u32,
+                    m: planes.as_mut_ptr() as u64,
+                    ..Default::default()
+                };
+                match unsafe { vidioc_dqbuf(fd, &mut buf) } {
+                    Ok(_) => {
+                        let index = buf.index as usize;
+                        if index >= self.buffers.len() {
+                            return Err(format!("mplane buffer index out of range: {}", index));
+                        }
+                        let mut disable_mirror = false;
+                        if let Some(ref mirror) = self.mirror {
+                            match mirror.set_plane(self.buffers[index].fb_id) {
+                                Ok(()) => {
+                                    self.mirror_errors = 0;
+                                }
+                                Err(e) => {
+                                    self.mirror_errors = self.mirror_errors.saturating_add(1);
+                                    if self.mirror_errors == 1 || self.mirror_errors % 60 == 0 {
+                                        eprintln!("DRM mirror set plane failed: {}", e);
+                                    }
+                                    if self.mirror_errors >= 120 {
+                                        disable_mirror = true;
+                                    }
+                                }
+                            }
+                        }
+                        if disable_mirror {
+                            eprintln!("Disabling direct DRM HDMI monitor after repeated failures.");
+                            self.disable_mirror();
+                        }
+                        let frame = if copy_frame {
+                            let used = planes[0]
+                                .bytesused
+                                .max(self.frame_size as u32)
+                                .min(self.buffers[index].length as u32)
+                                as usize;
+                            Some(Bytes::copy_from_slice(&self.buffers[index].map[..used]))
+                        } else {
+                            None
+                        };
+                        unsafe { vidioc_qbuf(fd, &mut buf) }
+                            .map_err(|e| format!("VIDIOC_QBUF mplane: {}", e))?;
+
+                        if self.mirror.is_some() {
+                            self.frames += 1;
+                            if self.window_start.elapsed() >= Duration::from_secs(10) {
+                                let fps =
+                                    self.frames as f64 / self.window_start.elapsed().as_secs_f64();
+                                println!("Direct DRM HDMI monitor FPS: {:.1}", fps);
+                                self.frames = 0;
+                                self.window_start = Instant::now();
+                            }
+                        }
+                        return Ok(frame);
+                    }
+                    Err(nix::errno::Errno::EAGAIN) => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(e) => return Err(format!("VIDIOC_DQBUF mplane: {}", e)),
+                }
+            }
+        }
+
+        fn has_drm_mirror(&self) -> bool {
+            self.mirror.is_some()
+        }
+
+        fn disable_mirror(&mut self) {
+            if let Some(drm) = self.mirror.take() {
+                for buffer in self.buffers.iter_mut() {
+                    drm.remove_framebuffer(buffer.fb_id);
+                    buffer.fb_id = 0;
+                    buffer.drm_handle = 0;
+                }
+            }
+            self.mirror_errors = 0;
+        }
+    }
+
+    impl Drop for MplaneCapture {
+        fn drop(&mut self) {
+            let type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            let _ = unsafe { vidioc_streamoff(self.file.as_raw_fd(), &type_ as *const u32) };
+            self.disable_mirror();
+        }
+    }
+
+    impl DrmMirror {
+        fn open(width: u32, height: u32) -> Result<Self, String> {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/dri/card0")
+                .map_err(|e| format!("open /dev/dri/card0: {}", e))?;
+            let fd = file.as_raw_fd();
+            unsafe {
+                drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+            }
+            let res = unsafe { drmModeGetResources(fd) };
+            if res.is_null() {
+                return Err("drmModeGetResources failed".to_string());
+            }
+            let result = unsafe {
+                let crtc_id = find_connected_crtc(fd, res)?;
+                let plane_id = find_drm_plane(fd, res, crtc_id, DRM_FORMAT_BGR888)?;
+                Ok(Self {
+                    file,
+                    crtc_id,
+                    plane_id,
+                    width,
+                    height,
+                })
+            };
+            unsafe {
+                drmModeFreeResources(res);
+            }
+            if let Ok(ref mirror) = result {
+                println!(
+                    "Direct DRM HDMI monitor opened: crtc={} plane={} format=BG24",
+                    mirror.crtc_id, mirror.plane_id
+                );
+            }
+            result
+        }
+
+        fn add_framebuffer(
+            &mut self,
+            dma_fd: RawFd,
+            pitch: u32,
+            drm_handle: &mut u32,
+            fb_id: &mut u32,
+        ) -> Result<(), String> {
+            let fd = self.file.as_raw_fd();
+            let prime = unsafe { drmPrimeFDToHandle(fd, dma_fd, drm_handle as *mut u32) };
+            if prime != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            let handles = [*drm_handle, 0, 0, 0];
+            let pitches = [pitch, 0, 0, 0];
+            let offsets = [0u32, 0, 0, 0];
+            let add = unsafe {
+                drmModeAddFB2(
+                    fd,
+                    self.width,
+                    self.height,
+                    DRM_FORMAT_BGR888,
+                    handles.as_ptr(),
+                    pitches.as_ptr(),
+                    offsets.as_ptr(),
+                    fb_id as *mut u32,
+                    0,
+                )
+            };
+            if add != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(())
+        }
+
+        fn set_plane(&self, fb_id: u32) -> Result<(), String> {
+            if fb_id == 0 {
+                return Ok(());
+            }
+            let r = unsafe {
+                drmModeSetPlane(
+                    self.file.as_raw_fd(),
+                    self.plane_id,
+                    self.crtc_id,
+                    fb_id,
+                    0,
+                    0,
+                    0,
+                    self.width,
+                    self.height,
+                    0,
+                    0,
+                    self.width << 16,
+                    self.height << 16,
+                )
+            };
+            if r != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(())
+        }
+
+        fn remove_framebuffer(&self, fb_id: u32) {
+            if fb_id != 0 {
+                unsafe {
+                    drmModeRmFB(self.file.as_raw_fd(), fb_id);
+                }
+            }
+        }
+    }
+
+    unsafe fn find_connected_crtc(fd: RawFd, res: *mut DrmModeRes) -> Result<u32, String> {
+        let connectors =
+            std::slice::from_raw_parts((*res).connectors, (*res).count_connectors.max(0) as usize);
+        for &connector_id in connectors {
+            let conn = drmModeGetConnector(fd, connector_id);
+            if conn.is_null() {
+                continue;
+            }
+            let connected = (*conn).connection == DRM_MODE_CONNECTED && (*conn).count_modes > 0;
+            if !connected {
+                drmModeFreeConnector(conn);
+                continue;
+            }
+            if (*conn).encoder_id != 0 {
+                let enc = drmModeGetEncoder(fd, (*conn).encoder_id);
+                if !enc.is_null() {
+                    let crtc_id = (*enc).crtc_id;
+                    drmModeFreeEncoder(enc);
+                    if crtc_id != 0 {
+                        drmModeFreeConnector(conn);
+                        return Ok(crtc_id);
+                    }
+                }
+            }
+            drmModeFreeConnector(conn);
+        }
+        Err("no connected DRM CRTC found".to_string())
+    }
+
+    unsafe fn find_drm_plane(
+        fd: RawFd,
+        res: *mut DrmModeRes,
+        crtc_id: u32,
+        format: u32,
+    ) -> Result<u32, String> {
+        let crtcs = std::slice::from_raw_parts((*res).crtcs, (*res).count_crtcs.max(0) as usize);
+        let Some(crtc_index) = crtcs.iter().position(|id| *id == crtc_id) else {
+            return Err(format!("CRTC {} not in DRM resources", crtc_id));
+        };
+        let planes = drmModeGetPlaneResources(fd);
+        if planes.is_null() {
+            return Err("drmModeGetPlaneResources failed".to_string());
+        }
+        let plane_ids =
+            std::slice::from_raw_parts((*planes).planes, (*planes).count_planes as usize);
+        let mut fallback = 0u32;
+        for &plane_id in plane_ids {
+            let plane = drmModeGetPlane(fd, plane_id);
+            if plane.is_null() {
+                continue;
+            }
+            let formats =
+                std::slice::from_raw_parts((*plane).formats, (*plane).count_formats as usize);
+            let supports_crtc = ((*plane).possible_crtcs & (1 << crtc_index)) != 0;
+            let supports_format = formats.contains(&format);
+            let type_ = if supports_crtc && supports_format {
+                drm_plane_type(fd, plane_id)
+            } else {
+                -1
+            };
+            drmModeFreePlane(plane);
+            if !supports_crtc || !supports_format {
+                continue;
+            }
+            if type_ == DRM_PLANE_TYPE_PRIMARY {
+                drmModeFreePlaneResources(planes);
+                return Ok(plane_id);
+            }
+            if fallback == 0 {
+                fallback = plane_id;
+            }
+        }
+        drmModeFreePlaneResources(planes);
+        if fallback != 0 {
+            Ok(fallback)
+        } else {
+            Err("no DRM plane supports BG24 on connected CRTC".to_string())
+        }
+    }
+
+    unsafe fn drm_plane_type(fd: RawFd, plane_id: u32) -> i32 {
+        let props = drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+        if props.is_null() {
+            return -1;
+        }
+        let prop_ids = std::slice::from_raw_parts((*props).props, (*props).count_props as usize);
+        let values =
+            std::slice::from_raw_parts((*props).prop_values, (*props).count_props as usize);
+        let mut result = -1;
+        for (idx, &prop_id) in prop_ids.iter().enumerate() {
+            let prop = drmModeGetProperty(fd, prop_id);
+            if prop.is_null() {
+                continue;
+            }
+            let name = CStr::from_ptr((*prop).name.as_ptr()).to_string_lossy();
+            if name == "type" {
+                result = values[idx] as i32;
+                drmModeFreeProperty(prop);
+                break;
+            }
+            drmModeFreeProperty(prop);
+        }
+        drmModeFreeObjectProperties(props);
+        result
+    }
+
     impl<'a> CaptureSource<'a> {
-        fn next_frame(&mut self) -> Result<Bytes, String> {
+        fn next_frame(&mut self, copy_frame: bool) -> Result<Option<Bytes>, String> {
             match self {
                 CaptureSource::V4l { stream } => stream
                     .next()
-                    .map(|(data, _)| Bytes::copy_from_slice(data))
+                    .map(|(data, _)| {
+                        if copy_frame {
+                            Some(Bytes::copy_from_slice(data))
+                        } else {
+                            None
+                        }
+                    })
                     .map_err(|e| e.to_string()),
+                CaptureSource::Mplane(capture) => capture.next_frame(copy_frame),
                 CaptureSource::Ffmpeg(capture) => {
-                    read_exact(&mut capture.stdout, &mut capture.frame_buf)
-                        .then(|| Bytes::copy_from_slice(&capture.frame_buf))
-                        .ok_or_else(|| "ffmpeg capture stdout ended".to_string())
+                    if !read_exact(&mut capture.stdout, &mut capture.frame_buf) {
+                        return Err("ffmpeg capture stdout ended".to_string());
+                    }
+                    Ok(if copy_frame {
+                        Some(Bytes::copy_from_slice(&capture.frame_buf))
+                    } else {
+                        None
+                    })
                 }
             }
         }
@@ -246,8 +1073,20 @@ mod linux {
             // Auto-detect encoder if not specified
             let enc = if encoder_name.is_empty() {
                 match codec_type {
-                    "h265" => detect_hw_encoder(&["hevc_rkmpp", "hevc_v4l2m2m", "hevc_vaapi", "hevc_nvenc", "hevc_qsv"]),
-                    "h264" => detect_hw_encoder(&["h264_rkmpp", "h264_v4l2m2m", "h264_vaapi", "h264_nvenc", "h264_qsv"]),
+                    "h265" => detect_hw_encoder(&[
+                        "hevc_rkmpp",
+                        "hevc_v4l2m2m",
+                        "hevc_vaapi",
+                        "hevc_nvenc",
+                        "hevc_qsv",
+                    ]),
+                    "h264" => detect_hw_encoder(&[
+                        "h264_rkmpp",
+                        "h264_v4l2m2m",
+                        "h264_vaapi",
+                        "h264_nvenc",
+                        "h264_qsv",
+                    ]),
                     _ => return Err("Unknown codec type".to_string()),
                 }
             } else {
@@ -258,16 +1097,26 @@ mod linux {
 
             let mut cmd = Command::new("ffmpeg");
             cmd.args([
-                "-loglevel", "error",
-                "-f", "rawvideo",
-                "-pix_fmt", input_pix_fmt,
-                "-s", &size,
-                "-r", &rate,
-                "-i", "pipe:0",
-                "-c:v", &enc,
-                "-g", "1",        // GOP=1 (all-intra)
-                "-bf", "0",       // no B-frames
-                "-f", "avi",      // AVI container for frame boundaries
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                input_pix_fmt,
+                "-s",
+                &size,
+                "-r",
+                &rate,
+                "-i",
+                "pipe:0",
+                "-c:v",
+                &enc,
+                "-g",
+                "1", // GOP=1 (all-intra)
+                "-bf",
+                "0", // no B-frames
+                "-f",
+                "avi", // AVI container for frame boundaries
                 "pipe:1",
             ]);
             cmd.stdin(Stdio::piped())
@@ -278,7 +1127,11 @@ mod linux {
             let stdin = child.stdin.take().ok_or("no stdin")?;
             let stdout = child.stdout.take().ok_or("no stdout")?;
 
-            let omt_codec = if codec_type == "h264" { OMTCodec::H264 } else { OMTCodec::H265 };
+            let omt_codec = if codec_type == "h264" {
+                OMTCodec::H264
+            } else {
+                OMTCodec::H265
+            };
 
             Ok(HwEncoderContext {
                 child,
@@ -339,7 +1192,8 @@ mod linux {
                 return None;
             }
             let fourcc = &chunk_hdr[..4];
-            let size = u32::from_le_bytes([chunk_hdr[4], chunk_hdr[5], chunk_hdr[6], chunk_hdr[7]]) as usize;
+            let size = u32::from_le_bytes([chunk_hdr[4], chunk_hdr[5], chunk_hdr[6], chunk_hdr[7]])
+                as usize;
 
             // Skip non-video chunks (e.g., "idx1" index)
             if fourcc != b"00dc" && fourcc != b"01dc" {
@@ -451,8 +1305,12 @@ mod linux {
                 Ok(actual) => {
                     println!(
                         "V4L2 format set: requested {}x{} {:?}, got {}x{} {:?}",
-                        settings.width, settings.height, desired_fourcc,
-                        actual.width, actual.height, actual.fourcc
+                        settings.width,
+                        settings.height,
+                        desired_fourcc,
+                        actual.width,
+                        actual.height,
+                        actual.fourcc
                     );
                     v4l_fmt = Some(actual);
                 }
@@ -463,10 +1321,7 @@ mod linux {
             }
         }
 
-        let configured_fps = (
-            settings.frame_rate_n.max(1),
-            settings.frame_rate_d.max(1),
-        );
+        let configured_fps = (settings.frame_rate_n.max(1), settings.frame_rate_d.max(1));
         let source_fps = detected_source_fps.unwrap_or(configured_fps);
         let target_fps = if settings.use_native_format
             && settings.frame_rate_n > 0
@@ -502,28 +1357,51 @@ mod linux {
         }
 
         let mut source: CaptureSource<'_>;
-        let (input_width, input_height, input_fourcc, input_codec, input_stride) =
-            if let Some(fmt) = v4l_fmt {
-                let input_codec = fourcc_to_codec(fmt.fourcc);
-                let stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 2) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("Failed to create video stream: {}", e);
-                        return;
+        let mut suppress_auto_hdmi_preview = false;
+        let (input_width, input_height, input_fourcc, input_codec, input_stride) = if let Some(
+            fmt,
+        ) = v4l_fmt
+        {
+            let input_codec = fourcc_to_codec(fmt.fourcc);
+            let stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, 2) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to create video stream: {}", e);
+                    return;
+                }
+            };
+            source = CaptureSource::V4l { stream };
+            (fmt.width, fmt.height, fmt.fourcc, input_codec, fmt.stride)
+        } else {
+            eprintln!(
+                "V4L2 single-plane format query failed; trying multiplanar native capture for {}.",
+                settings.device_path
+            );
+            let width = settings.width.max(1);
+            let height = settings.height.max(1);
+            let enable_drm_mirror = preview.blocking_read().auto_hdmi_monitor;
+            suppress_auto_hdmi_preview = enable_drm_mirror;
+            match MplaneCapture::start(&settings, width, height, enable_drm_mirror) {
+                Ok((capture, actual_width, actual_height, pitch)) => {
+                    if capture.has_drm_mirror() {
+                        println!("Using direct DRM HDMI monitor path.");
                     }
-                };
-                source = CaptureSource::V4l { stream };
-                (fmt.width, fmt.height, fmt.fourcc, input_codec, fmt.stride)
-            } else {
-                eprintln!(
-                    "V4L2 single-plane format query failed; using ffmpeg capture fallback for {}.",
-                    settings.device_path
-                );
-                let width = settings.width.max(1);
-                let height = settings.height.max(1);
-                let capture_format = select_ffmpeg_capture_format(&settings, desired_pix_fmt);
-                let capture =
-                    match start_ffmpeg_capture(
+                    source = CaptureSource::Mplane(capture);
+                    (
+                        actual_width,
+                        actual_height,
+                        FourCC::new(b"BGR3"),
+                        OMTCodec::BGRA,
+                        pitch,
+                    )
+                }
+                Err(native_err) => {
+                    eprintln!(
+                            "Multiplanar native capture unavailable: {}; using ffmpeg capture fallback.",
+                            native_err
+                        );
+                    let capture_format = select_ffmpeg_capture_format(&settings, desired_pix_fmt);
+                    let capture = match start_ffmpeg_capture(
                         &settings,
                         &capture_format.pix_fmt,
                         capture_format.force_input_format,
@@ -538,15 +1416,17 @@ mod linux {
                             return;
                         }
                     };
-                source = CaptureSource::Ffmpeg(capture);
-                (
-                    width,
-                    height,
-                    capture_format.fourcc,
-                    capture_format.codec,
-                    codec_stride(capture_format.codec, width),
-                )
-            };
+                    source = CaptureSource::Ffmpeg(capture);
+                    (
+                        width,
+                        height,
+                        capture_format.fourcc,
+                        capture_format.codec,
+                        codec_stride(capture_format.codec, width),
+                    )
+                }
+            }
+        };
 
         let input_pix_fmt = codec_to_pix_fmt(input_codec);
 
@@ -642,7 +1522,10 @@ mod linux {
         };
 
         let mut preview_sinks = {
-            let current_preview = preview.blocking_read().clone();
+            let mut current_preview = preview.blocking_read().clone();
+            if suppress_auto_hdmi_preview {
+                current_preview.auto_hdmi_monitor = false;
+            }
             build_preview_sinks(
                 &settings,
                 &current_preview,
@@ -703,11 +1586,8 @@ mod linux {
                 (3u8, root::VMX_PROFILE_VMX_PROFILE_OMT_HQ),
             ] {
                 unsafe {
-                    let inst = root::VMX_Create(
-                        size,
-                        profile,
-                        root::VMX_COLORSPACE_VMX_COLORSPACE_BT709,
-                    );
+                    let inst =
+                        root::VMX_Create(size, profile, root::VMX_COLORSPACE_VMX_COLORSPACE_BT709);
                     if !inst.is_null() {
                         let _ = root::VMX_SetThreads(inst, vmx_threads as i32);
                         quality_instances.push(QualityInstance {
@@ -744,7 +1624,10 @@ mod linux {
             }
             if preview_restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
                 preview_restart_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-                let current_preview = preview.blocking_read().clone();
+                let mut current_preview = preview.blocking_read().clone();
+                if suppress_auto_hdmi_preview {
+                    current_preview.auto_hdmi_monitor = false;
+                }
                 stop_preview_sinks(&mut preview_sinks);
                 preview_sinks = build_preview_sinks(
                     &settings,
@@ -757,7 +1640,10 @@ mod linux {
                 last_detected_hdmi_outputs = connected_hdmi_framebuffers();
             } else if last_preview_hotplug_check.elapsed() >= Duration::from_secs(2) {
                 last_preview_hotplug_check = Instant::now();
-                let current_preview = preview.blocking_read().clone();
+                let mut current_preview = preview.blocking_read().clone();
+                if suppress_auto_hdmi_preview {
+                    current_preview.auto_hdmi_monitor = false;
+                }
                 if current_preview.auto_hdmi_monitor
                     || preview_has_framebuffer_output(&current_preview)
                     || !last_detected_hdmi_outputs.is_empty()
@@ -784,10 +1670,26 @@ mod linux {
             // Quality-level switching is handled by per-quality VMX instances.
             // No need to recreate the default instance.
 
-            let raw_data = match source.next_frame() {
-                Ok(frame) => {
+            let copy_frame = if throttle_fps {
+                let now = Instant::now();
+                if now.duration_since(last_output_frame_at) < output_frame_interval {
+                    false
+                } else {
+                    last_output_frame_at = now;
+                    true
+                }
+            } else {
+                true
+            };
+
+            let raw_data = match source.next_frame(copy_frame) {
+                Ok(Some(frame)) => {
                     consecutive_capture_errors = 0;
                     frame
+                }
+                Ok(None) => {
+                    consecutive_capture_errors = 0;
+                    continue;
                 }
                 Err(e) => {
                     eprintln!("Failed to read video frame: {}", e);
@@ -809,13 +1711,6 @@ mod linux {
                 // Apply preview changes as soon as possible, but after we finish a V4L2 read to
                 // avoid leaving the stream in a weird state.
                 continue;
-            }
-            if throttle_fps {
-                let now = Instant::now();
-                if now.duration_since(last_output_frame_at) < output_frame_interval {
-                    continue;
-                }
-                last_output_frame_at = now;
             }
             let raw_data = if input_codec == OMTCodec::BGRA
                 && raw_data.len() == input_width as usize * input_height as usize * 3
@@ -905,11 +1800,13 @@ mod linux {
                 for qi in quality_instances.iter_mut() {
                     // Skip quality levels with no active receivers
                     let bit = match qi.level {
-                        1 => 1u8,  // LQ
-                        2 => 2u8,  // SQ
-                        _ => 4u8,  // HQ
+                        1 => 1u8, // LQ
+                        2 => 2u8, // SQ
+                        _ => 4u8, // HQ
                     };
-                    if mask & bit == 0 { continue; }
+                    if mask & bit == 0 {
+                        continue;
+                    }
                     let err = unsafe {
                         vmx_encode_frame(
                             qi.inst,
@@ -921,7 +1818,11 @@ mod linux {
                     };
                     if err == root::VMX_ERR_VMX_ERR_OK {
                         let compressed_len = unsafe {
-                            root::VMX_SaveTo(qi.inst, qi.buffer.as_mut_ptr(), qi.buffer.len() as i32)
+                            root::VMX_SaveTo(
+                                qi.inst,
+                                qi.buffer.as_mut_ptr(),
+                                qi.buffer.len() as i32,
+                            )
                         };
                         if compressed_len > 0 {
                             let preview_payload_len =
@@ -958,11 +1859,18 @@ mod linux {
                 use std::io::Write;
                 if hw_h264.is_none() {
                     match HwEncoderContext::start(
-                        &input_pix_fmt_str, encode_width, encode_height,
-                        effective_output_rate_n, effective_output_rate_d,
-                        &settings.hw_encoder, "h264",
+                        &input_pix_fmt_str,
+                        encode_width,
+                        encode_height,
+                        effective_output_rate_n,
+                        effective_output_rate_d,
+                        &settings.hw_encoder,
+                        "h264",
                     ) {
-                        Ok(ctx) => { println!("H.264 HW encoder started"); hw_h264 = Some(ctx); }
+                        Ok(ctx) => {
+                            println!("H.264 HW encoder started");
+                            hw_h264 = Some(ctx);
+                        }
                         Err(e) => eprintln!("H.264 encoder failed: {}", e),
                     }
                 }
@@ -973,11 +1881,13 @@ mod linux {
                             f.header.timestamp = capture_timestamp;
                             f.video_header = Some(OMTVideoHeader {
                                 codec: OMTCodec::H264 as i32,
-                                width: frame_width as i32, height: frame_height as i32,
+                                width: frame_width as i32,
+                                height: frame_height as i32,
                                 frame_rate_n: effective_output_rate_n as i32,
                                 frame_rate_d: effective_output_rate_d as i32,
                                 aspect_ratio: frame_width as f32 / frame_height as f32,
-                                flags: 0, color_space: 709,
+                                flags: 0,
+                                color_space: 709,
                             });
                             f.data = Bytes::from(compressed);
                             f.update_data_length();
@@ -994,11 +1904,18 @@ mod linux {
                 use std::io::Write;
                 if hw_h265.is_none() {
                     match HwEncoderContext::start(
-                        &input_pix_fmt_str, encode_width, encode_height,
-                        effective_output_rate_n, effective_output_rate_d,
-                        &settings.hw_encoder, "h265",
+                        &input_pix_fmt_str,
+                        encode_width,
+                        encode_height,
+                        effective_output_rate_n,
+                        effective_output_rate_d,
+                        &settings.hw_encoder,
+                        "h265",
                     ) {
-                        Ok(ctx) => { println!("H.265 HW encoder started"); hw_h265 = Some(ctx); }
+                        Ok(ctx) => {
+                            println!("H.265 HW encoder started");
+                            hw_h265 = Some(ctx);
+                        }
                         Err(e) => eprintln!("H.265 encoder failed: {}", e),
                     }
                 }
@@ -1009,11 +1926,13 @@ mod linux {
                             f.header.timestamp = capture_timestamp;
                             f.video_header = Some(OMTVideoHeader {
                                 codec: OMTCodec::H265 as i32,
-                                width: frame_width as i32, height: frame_height as i32,
+                                width: frame_width as i32,
+                                height: frame_height as i32,
                                 frame_rate_n: effective_output_rate_n as i32,
                                 frame_rate_d: effective_output_rate_d as i32,
                                 aspect_ratio: frame_width as f32 / frame_height as f32,
-                                flags: 0, color_space: 709,
+                                flags: 0,
+                                color_space: 709,
                             });
                             f.data = Bytes::from(compressed);
                             f.update_data_length();
@@ -1089,7 +2008,6 @@ mod linux {
 
         // Stop preview workers.
         stop_preview_sinks(&mut preview_sinks);
-
     }
 
     fn stop_preview_sinks(preview_sinks: &mut [PreviewSink]) {
@@ -1103,8 +2021,14 @@ mod linux {
 
     fn preview_has_framebuffer_output(preview: &PreviewSettings) -> bool {
         preview.output_device.starts_with("/dev/fb")
-            || preview.output_devices.iter().any(|d| d.starts_with("/dev/fb"))
-            || preview.outputs.iter().any(|o| o.device.starts_with("/dev/fb"))
+            || preview
+                .output_devices
+                .iter()
+                .any(|d| d.starts_with("/dev/fb"))
+            || preview
+                .outputs
+                .iter()
+                .any(|o| o.device.starts_with("/dev/fb"))
     }
 
     unsafe fn vmx_encode_frame(
@@ -1316,8 +2240,7 @@ mod linux {
     }
 
     fn fps_less_than(left: (u32, u32), right: (u32, u32)) -> bool {
-        (left.0 as u64) * (right.1.max(1) as u64)
-            < (right.0 as u64) * (left.1.max(1) as u64)
+        (left.0 as u64) * (right.1.max(1) as u64) < (right.0 as u64) * (left.1.max(1) as u64)
     }
 
     struct ActiveCaptureFormat {
@@ -1388,6 +2311,10 @@ mod linux {
             return None;
         }
         Some(FourCC::new(&[bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn fourcc_u32_to_string(value: u32) -> String {
+        String::from_utf8_lossy(&value.to_le_bytes()).to_string()
     }
 
     fn ffmpeg_v4l2_capture_pix_fmts(device_path: &str) -> HashSet<String> {
@@ -1745,7 +2672,7 @@ mod linux {
                 pixel_format: String::new(),
                 rotate: 0,
             });
-        };
+        }
 
         let fourcc_str = std::str::from_utf8(&input_fourcc.repr).unwrap_or("YUYV");
         let pix_fmt = match fourcc_str {
@@ -2021,22 +2948,27 @@ mod linux {
                     preview_width, preview_height, preview_format
                 )
             };
-            let frame_bytes =
-                raw_frame_size(preview_width, preview_height, &preview_format).unwrap_or_else(
-                    || preview_width as usize * preview_height as usize * 2,
-                );
+            let frame_bytes = raw_frame_size(preview_width, preview_height, &preview_format)
+                .unwrap_or_else(|| preview_width as usize * preview_height as usize * 2);
 
             // Outer loop: restart ffmpeg on failure.
             loop {
                 let mut cmd = Command::new("ffmpeg");
                 cmd.args([
-                    "-loglevel", "error",
-                    "-f", "rawvideo",
-                    "-pix_fmt", &pix_fmt,
-                    "-s", &format!("{}x{}", input_width, input_height),
-                    "-r", &input_rate,
-                    "-i", "pipe:0",
-                    "-vf", &vf,
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    &pix_fmt,
+                    "-s",
+                    &format!("{}x{}", input_width, input_height),
+                    "-r",
+                    &input_rate,
+                    "-i",
+                    "pipe:0",
+                    "-vf",
+                    &vf,
                 ]);
                 if is_fbdev {
                     cmd.args(["-f", "rawvideo", "pipe:1"]);
@@ -2068,10 +3000,7 @@ mod linux {
                     let reader = std::thread::spawn(move || {
                         let mut stdout = stdout;
                         let mut buf = vec![0u8; frame_bytes];
-                        let mut fd = match std::fs::OpenOptions::new()
-                            .write(true)
-                            .open(&fb_path)
-                        {
+                        let mut fd = match std::fs::OpenOptions::new().write(true).open(&fb_path) {
                             Ok(f) => f,
                             Err(_) => return,
                         };
@@ -2284,7 +3213,10 @@ mod linux {
     }
 
     fn is_hdmi_framebuffer(path: &str) -> bool {
-        let Some(fb) = std::path::Path::new(path).file_name().and_then(|v| v.to_str()) else {
+        let Some(fb) = std::path::Path::new(path)
+            .file_name()
+            .and_then(|v| v.to_str())
+        else {
             return false;
         };
         if !fb.starts_with("fb") {

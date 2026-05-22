@@ -19,12 +19,13 @@ cd ~/omt-encoder
 - For Orange Pi 5 Plus HDMI RX, use an Orange Pi 5 Plus Armbian image with RK3588 HDMI RX kernel/DTB support. The tested image line is `Armbian_25.8.1_Orangepi5-plus_*_current_6.12.43_*` from `https://armbian.lv.auroradev.org/archive/orangepi5-plus/archive/`.
 - If the repo was cloned without `--recurse-submodules`, run `git submodule update --init --recursive` before building.
 - The systemd service is `omtencoder`; the installed binary is `/opt/omtencoder/omtencoder`.
-- `build_and_install_service.sh` installs/loads Rust via rustup when needed and updates submodules before `cargo build --release -p omtencoder`.
+- `build_and_install_service.sh` installs/loads Rust via rustup when needed, installs libdrm development packages, and updates submodules before `cargo build --release -p omtencoder`.
 - On Orange Pi RK3588 systems, the installer can add the `rk3588-hdmirx.dtbo` U-Boot overlay when HDMI RX is not visible. Set `REBOOT_AFTER_HDMIRX_CHANGE=1` to reboot automatically after changing the overlay.
 - At process startup, `device_autodetect` repairs stale video/HDMI audio config entries by selecting a real V4L2 capture device and HDMI ALSA capture device when available.
 
 ## Architecture
 - Video pipeline: V4L2 capture → VMX encode → broadcast to clients
+- Orange Pi HDMI RX uses V4L2 multiplanar BGR3 capture when single-plane V4L2 is not available. When `preview.auto_hdmi_monitor` is enabled, it mirrors captured DMABUF buffers directly to a DRM/KMS plane for HDMI passthrough instead of using the older fbdev/GStreamer path.
 - Audio pipeline: ALSA capture (HDMI + TRS) → mix → broadcast
 - Server: OMTServer (libomtnet) handles client connections + subscriptions
 - Web: Axum REST API + embedded HTML UI
