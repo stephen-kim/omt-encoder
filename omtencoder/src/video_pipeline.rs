@@ -2146,6 +2146,12 @@ mod linux {
                 "!",
                 "kmssink",
                 "sync=false",
+                "async=false",
+                "qos=false",
+                "force-modesetting=true",
+                "restore-crtc=false",
+                "skip-vsync=true",
+                "enable-last-sample=false",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
