@@ -1880,6 +1880,52 @@ mod linux {
                         Some(n) => n,
                         None => return,
                     };
+                if is_hdmi_framebuffer(&output) {
+                    if let Some(gst_format) = gst_raw_video_format(&preview_format) {
+                        if let Ok(mut child) = start_kms_preview(
+                            &gst_format,
+                            preview_width,
+                            preview_height,
+                            &input_rate,
+                            frame_bytes,
+                        ) {
+                            println!(
+                                "Preview output KMS path: {} ({}x{}, {}, {}fps)",
+                                output, preview_width, preview_height, preview_format, input_rate
+                            );
+                            let mut preview_frames = 0usize;
+                            let mut preview_window = Instant::now();
+                            let mut stdin = match child.stdin.take() {
+                                Some(stdin) => stdin,
+                                None => return,
+                            };
+                            while let Ok(frame) = rx.recv() {
+                                if frame.len() < frame_bytes {
+                                    continue;
+                                }
+                                if stdin.write_all(&frame[..frame_bytes]).is_err() {
+                                    break;
+                                }
+                                preview_frames += 1;
+                                if preview_window.elapsed() >= Duration::from_secs(10) {
+                                    let fps = preview_frames as f64
+                                        / preview_window.elapsed().as_secs_f64();
+                                    println!("Preview output FPS: {:.1} ({})", fps, output);
+                                    preview_frames = 0;
+                                    preview_window = Instant::now();
+                                }
+                            }
+                            drop(stdin);
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return;
+                        }
+                    }
+                    eprintln!(
+                        "Preview output KMS path unavailable for {}. Falling back to fbdev.",
+                        output
+                    );
+                }
                 let mut fd = match std::fs::OpenOptions::new()
                     .read(true)
                     .write(true)
@@ -2068,6 +2114,57 @@ mod linux {
         PreviewSink {
             handle: Some(handle),
             ..sink
+        }
+    }
+
+    fn start_kms_preview(
+        format: &str,
+        width: u32,
+        height: u32,
+        rate: &str,
+        frame_bytes: usize,
+    ) -> Result<Child, String> {
+        Command::new("gst-launch-1.0")
+            .args([
+                "-q",
+                "fdsrc",
+                "fd=0",
+                &format!("blocksize={}", frame_bytes),
+                "do-timestamp=true",
+                "!",
+                "rawvideoparse",
+                &format!("format={}", format),
+                &format!("width={}", width),
+                &format!("height={}", height),
+                &format!("framerate={}", rate),
+                "!",
+                "queue",
+                "max-size-buffers=1",
+                "max-size-bytes=0",
+                "max-size-time=0",
+                "leaky=downstream",
+                "!",
+                "kmssink",
+                "sync=false",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("gst-launch-1.0 spawn: {}", e))
+    }
+
+    fn gst_raw_video_format(pixel_format: &str) -> Option<String> {
+        match pixel_format {
+            "bgra" => Some("bgra".to_string()),
+            "rgba" => Some("rgba".to_string()),
+            "rgb24" => Some("rgb".to_string()),
+            "bgr24" => Some("bgr".to_string()),
+            "rgb565le" => Some("rgb16".to_string()),
+            "yuyv422" => Some("yuy2".to_string()),
+            "uyvy422" => Some("uyvy".to_string()),
+            "nv12" => Some("nv12".to_string()),
+            _ => None,
         }
     }
 
