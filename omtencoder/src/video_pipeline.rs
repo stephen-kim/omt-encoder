@@ -1659,12 +1659,12 @@ mod linux {
                 continue;
             }
 
-            let interval_ms = if out.fps == 0 {
+            let mut interval_ms = if out.fps == 0 {
                 0
             } else {
                 1000 / out.fps.max(1) as u64
             };
-            let input_rate = if out.fps > 0 {
+            let mut input_rate = if out.fps > 0 {
                 out.fps.to_string()
             } else if settings.frame_rate_d == 0 {
                 "30".to_string()
@@ -1700,6 +1700,19 @@ mod linux {
             } else {
                 out.pixel_format.clone()
             };
+
+            if hdmi_framebuffer {
+                interval_ms = 0;
+                input_rate = if settings.frame_rate_d == 0 {
+                    "30".to_string()
+                } else {
+                    format!(
+                        "{}/{}",
+                        settings.frame_rate_n.max(1),
+                        settings.frame_rate_d.max(1)
+                    )
+                };
+            }
 
             if hdmi_framebuffer
                 && !(out.rotate == 0
