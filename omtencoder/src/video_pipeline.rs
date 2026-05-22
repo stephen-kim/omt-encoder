@@ -1584,12 +1584,17 @@ mod linux {
         input_height: u32,
         input_fourcc: FourCC,
     ) -> Vec<PreviewSink> {
-        if !preview.enabled {
+        let auto_hdmi_outputs = if preview.auto_hdmi_monitor {
+            connected_hdmi_framebuffers()
+        } else {
+            Vec::new()
+        };
+        if !preview.enabled && auto_hdmi_outputs.is_empty() {
             return Vec::new();
         }
 
         // Resolve output list: prefer per-output `outputs` array, fall back to legacy fields.
-        let resolved: Vec<ResolvedOutput> = if !preview.outputs.is_empty() {
+        let mut resolved: Vec<ResolvedOutput> = if preview.enabled && !preview.outputs.is_empty() {
             preview
                 .outputs
                 .iter()
@@ -1606,7 +1611,11 @@ mod linux {
                 })
                 .collect()
         } else {
-            let mut devs = preview.output_devices.clone();
+            let mut devs = if preview.enabled {
+                preview.output_devices.clone()
+            } else {
+                Vec::new()
+            };
             if devs.is_empty() && !preview.output_device.is_empty() {
                 devs.push(preview.output_device.clone());
             }
@@ -1619,9 +1628,18 @@ mod linux {
                 })
                 .collect()
         };
+        for device in auto_hdmi_outputs {
+            resolved.push(ResolvedOutput {
+                device,
+                fps: settings.frame_rate_n.max(1),
+                pixel_format: String::new(),
+                rotate: 0,
+            });
+        };
 
         let fourcc_str = std::str::from_utf8(&input_fourcc.repr).unwrap_or("YUYV");
         let pix_fmt = match fourcc_str {
+            "BGR3" | "BGRA" => "bgra",
             "UYVY" => "uyvy422",
             "YUY2" | "YUYV" => "yuyv422",
             "NV12" => "nv12",
@@ -1674,6 +1692,26 @@ mod linux {
                 out.pixel_format.clone()
             };
 
+            if is_hdmi_framebuffer(&out.device)
+                && !(out.rotate == 0
+                    && input_width == preview_width
+                    && input_height == preview_height
+                    && pix_fmt == fmt)
+            {
+                println!(
+                    "Skipping HDMI monitor output {}: direct path requires {}x{} {}, got {}x{} {} rotate={}",
+                    out.device,
+                    input_width,
+                    input_height,
+                    pix_fmt,
+                    preview_width,
+                    preview_height,
+                    fmt,
+                    out.rotate
+                );
+                continue;
+            }
+
             println!(
                 "Preview output: {} ({}x{} @ {}fps, {})",
                 out.device, preview_width, preview_height, input_rate, fmt
@@ -1714,6 +1752,37 @@ mod linux {
         let is_fbdev = output.starts_with("/dev/fb");
 
         let handle = std::thread::spawn(move || {
+            let direct_fbdev = is_fbdev
+                && rotate == 0
+                && input_width == preview_width
+                && input_height == preview_height
+                && pix_fmt == preview_format;
+            if direct_fbdev {
+                let frame_bytes = match raw_frame_size(preview_width, preview_height, &preview_format) {
+                    Some(n) => n,
+                    None => return,
+                };
+                let mut fd = match std::fs::OpenOptions::new().write(true).open(&output) {
+                    Ok(f) => f,
+                    Err(_) => return,
+                };
+                println!(
+                    "Preview output direct framebuffer path: {} ({}x{}, {})",
+                    output, preview_width, preview_height, preview_format
+                );
+                while let Ok(frame) = rx.recv() {
+                    if frame.len() < frame_bytes {
+                        continue;
+                    }
+                    use std::io::Seek;
+                    let _ = fd.seek(std::io::SeekFrom::Start(0));
+                    if fd.write_all(&frame[..frame_bytes]).is_err() {
+                        break;
+                    }
+                }
+                return;
+            }
+
             let vf = if rotate == 1 {
                 format!(
                     "scale={}:{}:flags=fast_bilinear,transpose=1,format={}",
@@ -1888,6 +1957,69 @@ mod linux {
             return None;
         }
         Some((width, height))
+    }
+
+    fn connected_hdmi_framebuffers() -> Vec<String> {
+        if !has_connected_hdmi_connector() {
+            return Vec::new();
+        }
+        let mut outputs = Vec::new();
+        let Ok(entries) = std::fs::read_dir("/sys/class/graphics") else {
+            return outputs;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(fb) = name.to_str() else {
+                continue;
+            };
+            if !fb.starts_with("fb") {
+                continue;
+            }
+            let dev = format!("/dev/{fb}");
+            if is_hdmi_framebuffer(&dev) {
+                outputs.push(dev);
+            }
+        }
+        outputs.sort();
+        outputs.dedup();
+        outputs
+    }
+
+    fn has_connected_hdmi_connector() -> bool {
+        let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let lower = name.to_ascii_lowercase();
+            if !(lower.contains("hdmi") || lower.contains("displayport") || lower.contains("dp-")) {
+                continue;
+            }
+            let status_path = entry.path().join("status");
+            if std::fs::read_to_string(status_path)
+                .map(|v| v.trim() == "connected")
+                .unwrap_or(false)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_hdmi_framebuffer(path: &str) -> bool {
+        let Some(fb) = std::path::Path::new(path).file_name().and_then(|v| v.to_str()) else {
+            return false;
+        };
+        if !fb.starts_with("fb") {
+            return false;
+        }
+        let name = std::fs::read_to_string(format!("/sys/class/graphics/{fb}/name"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        name.contains("drm") || name.contains("hdmi") || name.contains("rockchip")
     }
 
     fn raw_frame_size(width: u32, height: u32, pixel_format: &str) -> Option<usize> {

@@ -320,6 +320,7 @@ fn send_settings_changed(old: &Settings, new: &Settings) -> bool {
 
 fn preview_settings_changed(old: &Settings, new: &Settings) -> bool {
     old.preview.enabled != new.preview.enabled
+        || old.preview.auto_hdmi_monitor != new.preview.auto_hdmi_monitor
         || old.preview.output_device != new.preview.output_device
         || old.preview.output_devices != new.preview.output_devices
         || old.preview.outputs != new.preview.outputs

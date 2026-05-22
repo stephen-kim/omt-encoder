@@ -156,6 +156,9 @@ impl Default for PreviewOutputSettings {
 #[serde(default)]
 pub struct PreviewSettings {
     pub enabled: bool,
+    /// Automatically mirror the captured video to connected HDMI framebuffer outputs when
+    /// a zero-conversion direct framebuffer path is available.
+    pub auto_hdmi_monitor: bool,
     /// Legacy single-output field (used if outputs is empty).
     pub output_device: String,
     /// Legacy multi-output field (used if outputs is empty).
@@ -173,6 +176,7 @@ impl Default for PreviewSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            auto_hdmi_monitor: true,
             output_device: String::new(),
             output_devices: Vec::new(),
             outputs: Vec::new(),
