@@ -519,7 +519,7 @@ mod linux {
                 (
                     width,
                     height,
-                    codec_to_fourcc(capture_format.codec),
+                    capture_format.fourcc,
                     capture_format.codec,
                     codec_stride(capture_format.codec, width),
                 )
@@ -1142,6 +1142,7 @@ mod linux {
     struct FfmpegCaptureFormat {
         pix_fmt: String,
         codec: OMTCodec,
+        fourcc: FourCC,
         force_input_format: bool,
     }
 
@@ -1154,15 +1155,31 @@ mod linux {
             return FfmpegCaptureFormat {
                 pix_fmt: preferred_pix_fmt.to_string(),
                 codec: preferred_codec,
+                fourcc: codec_to_fourcc(preferred_codec),
                 force_input_format: false,
             };
         }
 
         let supported = ffmpeg_v4l2_capture_pix_fmts(&settings.device_path);
+        if let Some(active) = v4l2_active_capture_format(&settings.device_path) {
+            if supported.contains(&active.pix_fmt) {
+                println!(
+                    "FFmpeg native capture format: using active V4L2 format {} ({}) on {}",
+                    active.pix_fmt, active.fourcc_name, settings.device_path
+                );
+                return FfmpegCaptureFormat {
+                    pix_fmt: active.pix_fmt,
+                    codec: active.codec,
+                    fourcc: active.fourcc,
+                    force_input_format: true,
+                };
+            }
+        }
         if supported.contains(preferred_pix_fmt) {
             return FfmpegCaptureFormat {
                 pix_fmt: preferred_pix_fmt.to_string(),
                 codec: preferred_codec,
+                fourcc: codec_to_fourcc(preferred_codec),
                 force_input_format: true,
             };
         }
@@ -1181,6 +1198,8 @@ mod linux {
                 return FfmpegCaptureFormat {
                     pix_fmt: pix_fmt.to_string(),
                     codec,
+                    fourcc: ffmpeg_pix_fmt_to_fourcc(pix_fmt)
+                        .unwrap_or_else(|| codec_to_fourcc(codec)),
                     force_input_format: true,
                 };
             }
@@ -1189,8 +1208,79 @@ mod linux {
         FfmpegCaptureFormat {
             pix_fmt: preferred_pix_fmt.to_string(),
             codec: preferred_codec,
+            fourcc: codec_to_fourcc(preferred_codec),
             force_input_format: false,
         }
+    }
+
+    struct ActiveCaptureFormat {
+        fourcc_name: String,
+        fourcc: FourCC,
+        pix_fmt: String,
+        codec: OMTCodec,
+    }
+
+    fn v4l2_active_capture_format(device_path: &str) -> Option<ActiveCaptureFormat> {
+        let output = Command::new("v4l2-ctl")
+            .args(["-d", device_path, "--all"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let Some(idx) = line.find("Pixel Format") else {
+                continue;
+            };
+            let rest = &line[idx..];
+            let Some(first) = rest.find('\'') else {
+                continue;
+            };
+            let after_first = &rest[first + 1..];
+            let Some(second) = after_first.find('\'') else {
+                continue;
+            };
+            let fourcc = &after_first[..second];
+            if let Some((pix_fmt, codec)) = fourcc_to_ffmpeg_capture(fourcc) {
+                return Some(ActiveCaptureFormat {
+                    fourcc_name: fourcc.to_string(),
+                    fourcc: fourcc_from_str(fourcc)?,
+                    pix_fmt: pix_fmt.to_string(),
+                    codec,
+                });
+            }
+        }
+        None
+    }
+
+    fn fourcc_to_ffmpeg_capture(fourcc: &str) -> Option<(&'static str, OMTCodec)> {
+        match fourcc {
+            "BGR3" => Some(("bgr24", OMTCodec::BGRA)),
+            "NV12" => Some(("nv12", OMTCodec::NV12)),
+            "YUYV" | "YUY2" => Some(("yuyv422", OMTCodec::YUY2)),
+            "UYVY" => Some(("uyvy422", OMTCodec::UYVY)),
+            "YU12" | "YV12" => Some(("yuv420p", OMTCodec::YV12)),
+            "BGRA" => Some(("bgra", OMTCodec::BGRA)),
+            _ => None,
+        }
+    }
+
+    fn ffmpeg_pix_fmt_to_fourcc(pix_fmt: &str) -> Option<FourCC> {
+        match pix_fmt {
+            "bgr24" => Some(FourCC::new(b"BGR3")),
+            "nv12" => Some(FourCC::new(b"NV12")),
+            "yuyv422" => Some(FourCC::new(b"YUYV")),
+            "uyvy422" => Some(FourCC::new(b"UYVY")),
+            "yuv420p" => Some(FourCC::new(b"YU12")),
+            "bgra" => Some(FourCC::new(b"BGRA")),
+            _ => None,
+        }
+    }
+
+    fn fourcc_from_str(value: &str) -> Option<FourCC> {
+        let bytes = value.as_bytes();
+        if bytes.len() != 4 {
+            return None;
+        }
+        Some(FourCC::new(&[bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
     fn ffmpeg_v4l2_capture_pix_fmts(device_path: &str) -> HashSet<String> {
@@ -1225,7 +1315,11 @@ mod linux {
             let Some(pix_fmt) = raw_fmt.split_whitespace().next() else {
                 continue;
             };
-            if ["bgr24", "nv12", "uyvy422", "yuyv422", "bgra", "yuv420p"].contains(&pix_fmt) {
+            if [
+                "bgr24", "rgb24", "nv12", "uyvy422", "yuyv422", "bgra", "yuv420p",
+            ]
+            .contains(&pix_fmt)
+            {
                 supported.insert(pix_fmt.to_string());
             }
         }
