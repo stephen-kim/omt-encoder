@@ -176,7 +176,7 @@ impl Default for PreviewSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            auto_hdmi_monitor: true,
+            auto_hdmi_monitor: false,
             output_device: String::new(),
             output_devices: Vec::new(),
             outputs: Vec::new(),
