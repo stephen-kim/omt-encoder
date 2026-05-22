@@ -463,10 +463,24 @@ mod linux {
             }
         }
 
-        let (mut input_rate_n, mut input_rate_d) = detected_source_fps.unwrap_or((
+        let configured_fps = (
             settings.frame_rate_n.max(1),
             settings.frame_rate_d.max(1),
-        ));
+        );
+        let source_fps = detected_source_fps.unwrap_or(configured_fps);
+        let target_fps = if settings.use_native_format
+            && settings.frame_rate_n > 0
+            && fps_less_than(configured_fps, source_fps)
+        {
+            println!(
+                "Capping native output FPS to configured rate: {}/{} (source {}/{})",
+                configured_fps.0, configured_fps.1, source_fps.0, source_fps.1
+            );
+            configured_fps
+        } else {
+            source_fps
+        };
+        let (mut input_rate_n, mut input_rate_d) = target_fps;
 
         // Try to set capture frame interval (fps). Some devices ignore this, but when supported
         // it can reduce internal buffering and stabilize capture timing.
@@ -1299,6 +1313,11 @@ mod linux {
             b = r;
         }
         a
+    }
+
+    fn fps_less_than(left: (u32, u32), right: (u32, u32)) -> bool {
+        (left.0 as u64) * (right.1.max(1) as u64)
+            < (right.0 as u64) * (left.1.max(1) as u64)
     }
 
     struct ActiveCaptureFormat {
