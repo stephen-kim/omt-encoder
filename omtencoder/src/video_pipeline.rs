@@ -165,6 +165,7 @@ mod linux {
     use bytes::Bytes;
     use libomtnet::{OMTCodec, OMTFrame, OMTFrameType, OMTVideoFlags, OMTVideoHeader};
     use libvmx_sys::root;
+    use memmap2::MmapOptions;
     use std::collections::HashSet;
     use std::io::{Read, Write};
     use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -1874,26 +1875,61 @@ mod linux {
                 && input_height == preview_height
                 && pix_fmt == preview_format;
             if direct_fbdev {
-                let frame_bytes = match raw_frame_size(preview_width, preview_height, &preview_format) {
-                    Some(n) => n,
-                    None => return,
-                };
-                let mut fd = match std::fs::OpenOptions::new().write(true).open(&output) {
+                let frame_bytes =
+                    match raw_frame_size(preview_width, preview_height, &preview_format) {
+                        Some(n) => n,
+                        None => return,
+                    };
+                let mut fd = match std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&output)
+                {
                     Ok(f) => f,
                     Err(_) => return,
                 };
+                let mut fb_map = unsafe {
+                    MmapOptions::new()
+                        .len(frame_bytes)
+                        .map_mut(&fd)
+                        .map_err(|e| {
+                            eprintln!(
+                                "Preview output mmap failed for {}: {}. Falling back to write().",
+                                output, e
+                            );
+                            e
+                        })
+                        .ok()
+                };
                 println!(
-                    "Preview output direct framebuffer path: {} ({}x{}, {})",
-                    output, preview_width, preview_height, preview_format
+                    "Preview output direct framebuffer path: {} ({}x{}, {}, {})",
+                    output,
+                    preview_width,
+                    preview_height,
+                    preview_format,
+                    if fb_map.is_some() { "mmap" } else { "write" }
                 );
+                let mut preview_frames = 0usize;
+                let mut preview_window = Instant::now();
                 while let Ok(frame) = rx.recv() {
                     if frame.len() < frame_bytes {
                         continue;
                     }
-                    use std::io::Seek;
-                    let _ = fd.seek(std::io::SeekFrom::Start(0));
-                    if fd.write_all(&frame[..frame_bytes]).is_err() {
-                        break;
+                    if let Some(map) = fb_map.as_mut() {
+                        map[..frame_bytes].copy_from_slice(&frame[..frame_bytes]);
+                    } else {
+                        use std::io::Seek;
+                        let _ = fd.seek(std::io::SeekFrom::Start(0));
+                        if fd.write_all(&frame[..frame_bytes]).is_err() {
+                            break;
+                        }
+                    }
+                    preview_frames += 1;
+                    if preview_window.elapsed() >= Duration::from_secs(10) {
+                        let fps = preview_frames as f64 / preview_window.elapsed().as_secs_f64();
+                        println!("Preview output FPS: {:.1} ({})", fps, output);
+                        preview_frames = 0;
+                        preview_window = Instant::now();
                     }
                 }
                 return;
