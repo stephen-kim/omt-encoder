@@ -433,6 +433,11 @@ mod linux {
         let desired_codec = parse_codec(&settings.codec).unwrap_or(OMTCodec::YUY2);
         let desired_pix_fmt = codec_to_pix_fmt(desired_codec);
         let desired_fourcc = codec_to_fourcc(desired_codec);
+        let detected_source_fps = if settings.use_native_format {
+            detect_v4l2_dv_fps(&settings.device_path)
+        } else {
+            None
+        };
 
         // Set the desired capture format explicitly. Without this, V4L2 may default to the
         // smallest resolution the device supports (e.g. 720x576 instead of 1920x1080).
@@ -457,14 +462,15 @@ mod linux {
             }
         }
 
-        let mut input_rate_n = settings.frame_rate_n.max(1);
-        let mut input_rate_d = settings.frame_rate_d.max(1);
+        let (mut input_rate_n, mut input_rate_d) = detected_source_fps.unwrap_or((
+            settings.frame_rate_n.max(1),
+            settings.frame_rate_d.max(1),
+        ));
 
         // Try to set capture frame interval (fps). Some devices ignore this, but when supported
         // it can reduce internal buffering and stabilize capture timing.
         if v4l_fmt.is_some() && settings.frame_rate_n > 0 {
-            let interval =
-                Fraction::new(settings.frame_rate_d.max(1), settings.frame_rate_n.max(1));
+            let interval = Fraction::new(input_rate_d.max(1), input_rate_n.max(1));
             let params = CaptureParameters::new(interval);
             if let Err(e) = dev.set_params(&params) {
                 eprintln!("Warning: failed to set V4L2 capture params (fps): {}", e);
@@ -508,6 +514,8 @@ mod linux {
                         capture_format.force_input_format,
                         width,
                         height,
+                        input_rate_n,
+                        input_rate_d,
                     ) {
                         Ok(capture) => capture,
                         Err(e) => {
@@ -1247,6 +1255,51 @@ mod linux {
         }
     }
 
+    fn detect_v4l2_dv_fps(device_path: &str) -> Option<(u32, u32)> {
+        let output = Command::new("v4l2-ctl")
+            .args(["-d", device_path, "--all"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let Some(idx) = line.find("frames per second") else {
+                continue;
+            };
+            let before = &line[..idx];
+            let token = before
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .filter(|part| !part.is_empty())
+                .last()?;
+            let fps = token.parse::<f64>().ok()?;
+            if !(1.0..=240.0).contains(&fps) {
+                return None;
+            }
+            let mut numerator = (fps * 1000.0).round() as u32;
+            let mut denominator = 1000u32;
+            let divisor = gcd_u32(numerator, denominator).max(1);
+            numerator /= divisor;
+            denominator /= divisor;
+            println!(
+                "Detected V4L2 DV timing FPS on {}: {}/{}",
+                device_path, numerator, denominator
+            );
+            return Some((numerator.max(1), denominator.max(1)));
+        }
+        None
+    }
+
+    fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+        while b != 0 {
+            let r = a % b;
+            a = b;
+            b = r;
+        }
+        a
+    }
+
     struct ActiveCaptureFormat {
         fourcc_name: String,
         fourcc: FourCC,
@@ -1366,11 +1419,13 @@ mod linux {
         force_input_format: bool,
         output_width: u32,
         output_height: u32,
+        capture_rate_n: u32,
+        capture_rate_d: u32,
     ) -> Result<FfmpegCapture, String> {
-        let rate = if settings.frame_rate_n == 0 {
+        let rate = if capture_rate_n == 0 {
             "30".to_string()
         } else {
-            format!("{}/{}", settings.frame_rate_n, settings.frame_rate_d.max(1))
+            format!("{}/{}", capture_rate_n, capture_rate_d.max(1))
         };
         let frame_size = raw_frame_size(output_width, output_height, output_pix_fmt)
             .unwrap_or_else(|| {
